@@ -74,7 +74,7 @@ namespace honeymoon::kernel {
             int tab_width = 4;
         } settings;
 
-        // Menu definitions
+        // Menu definitions for now (add linter,fuzzy-file,tree-sitter)
         const std::vector<std::string> home_menu = {
             "File Searcher", "Recent Files", "Settings", "Help", "About", "Quit"
         };
@@ -126,9 +126,9 @@ namespace honeymoon::kernel {
         }
 
         void draw_centered_view() {
-            // Draw Logo
+            
             int logo_start_y = window_rows / 5;
-            if (logo_start_y < 1) logo_start_y = 1; // Ensure valid position
+            if (logo_start_y < 1) logo_start_y = 1; 
             draw_logo(logo_start_y);
 
             int menu_start_y = logo_start_y + logo_lines.size() + 2;
@@ -310,7 +310,7 @@ namespace honeymoon::kernel {
                 return;
             }
 
-            // Editor Mode Input Handling
+            
             if (k == Key::Esc) { waiting_for_meta = true; status_message = "M-"; return; }
             if (waiting_for_meta) { process_meta(k); return; }
             if (waiting_for_chord) { process_chord(k); return; }
