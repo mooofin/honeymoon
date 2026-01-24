@@ -34,7 +34,6 @@ The code is split into three namespaces:
 
 
 
----
 
 ## Build
 
@@ -42,14 +41,14 @@ You need a C++20 compiler and `make`.
 
 * Linux: you’re fine.
 * Windows: WSL or sm 
-* macOS: good luck with Clang.
+
 
 ```bash
 make
 ./honeymoon filename.txt
 ```
 
----
+
 
 ## Controls
 
