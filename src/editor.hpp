@@ -71,7 +71,7 @@ namespace honeymoon::kernel {
             int tab_width = 4;
         } settings;
 
-        
+        // Menu definitions for now (add linter,fuzzy-file,tree-sitter)
         const std::vector<std::string> home_menu = {
             "File Searcher", "Recent Files", "Settings", "Help", "About", "Quit"
         };
