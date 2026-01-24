@@ -33,7 +33,7 @@ namespace honeymoon::driver {
                 char seq[3];
                 if (read(STDIN_FILENO, &seq[0], 1) != 1) return Key::Esc;
                 if (read(STDIN_FILENO, &seq[1], 1) != 1) return Key::Esc;
-                if (seq[0] == '[') {
+        if (seq[0] == '[') {
                     if (seq[1] >= '0' && seq[1] <= '9') {
                         if (read(STDIN_FILENO, &seq[2], 1) != 1) return Key::Esc;
                         if (seq[2] == '~') {
@@ -50,6 +50,7 @@ namespace honeymoon::driver {
                             case 'A': return Key::ArrowUp; case 'B': return Key::ArrowDown;
                             case 'C': return Key::ArrowRight; case 'D': return Key::ArrowLeft;
                             case 'H': return Key::Home; case 'F': return Key::End;
+                            case 'Z': return Key::ShiftTab;
                         }
                     }
                 } else if (seq[0] == 'O') {

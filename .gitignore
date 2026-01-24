@@ -6,3 +6,5 @@ honeymoon
 *.dll
 *.obj
 releases/
+
+.honeymoon_history

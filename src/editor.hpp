@@ -11,7 +11,7 @@
 #include <sstream>
 
 namespace honeymoon::kernel {
-    enum class Mode { Editor, Home, FileSearch, RecentFiles, Settings, Help, About };
+    enum class Mode { Editor, Home, FileSearch, TextSearch, GotoLine, RecentFiles, Settings, Help, About };
 
     template <typename BufferPolicy, typename TerminalPolicy>
     requires EditableBuffer<BufferPolicy> && TerminalDevice<TerminalPolicy>
@@ -64,6 +64,8 @@ namespace honeymoon::kernel {
         int menu_selection = 0;
         std::vector<std::string> recent_files;
         std::string search_query;
+        size_t search_start_idx = 0;
+        bool search_forward = true;
 
         struct EditorSettings {
             bool show_line_numbers = true;
@@ -88,7 +90,7 @@ namespace honeymoon::kernel {
         void refresh_screen() {
             update_window_size();
             output_buffer.clear();
-            if (current_mode == Mode::Editor) {
+            if (current_mode == Mode::Editor || current_mode == Mode::TextSearch || current_mode == Mode::GotoLine) {
                 output_buffer.append("\x1b[?25l\x1b[H"); 
                 draw_rows(); draw_status_bar(); draw_message_bar(); place_cursor();
             } else {
@@ -283,6 +285,29 @@ namespace honeymoon::kernel {
             Key k = terminal.read_key();
             if (k == Key::None) return;
 
+            if (current_mode == Mode::TextSearch) {
+                if (k == Key::Enter || k == Key::Esc) { current_mode = Mode::Editor; status_message = ""; return; }
+                if (k == Key::Ctrl_G) { current_mode = Mode::Editor; buffer.move_gap(search_start_idx); status_message = "Cancelled"; return; }
+                
+                bool next = false;
+                if (k == Key::Backspace || k == Key::Ctrl_H) { if (!search_query.empty()) search_query.pop_back(); }
+                else if (k == Key::Ctrl_S) { search_forward = true; next = true; } 
+                else if (k == Key::Ctrl_R) { search_forward = false; next = true; }
+                else if (is_printable((int)k)) { search_query.push_back((char)k); }
+
+                std::string c = buffer.get_content();
+                size_t start_pos = buffer.get_cursor();
+                if (next) start_pos = (search_forward) ? start_pos + 1 : (start_pos > 0 ? start_pos - 1 : 0);
+                
+                size_t found = std::string::npos;
+                if (search_forward) found = c.find(search_query, start_pos);
+                else found = c.rfind(search_query, start_pos);
+
+                if (found != std::string::npos) { buffer.move_gap(found); status_message="I-Search: " + search_query; }
+                else { status_message="Failing I-Search: " + search_query; }
+                return;
+            }
+
             if (current_mode != Mode::Editor) {
                 if (k == Key::Esc) { current_mode = Mode::Home; menu_selection = 0; search_query.clear(); return; }
                 
@@ -308,12 +333,40 @@ namespace honeymoon::kernel {
                     if (k == Key::Enter) { if (!search_query.empty()) open(search_query); }
                     else if (k == Key::Backspace || k == Key::Ctrl_H) { if (!search_query.empty()) search_query.pop_back(); }
                     else if (is_printable((int)k)) search_query.push_back((char)k);
+                } else if (current_mode == Mode::GotoLine) {
+                    if (k == Key::Enter) {
+                        if (!search_query.empty()) {
+                            try {
+                                int line = std::stoi(search_query);
+                                std::string c = buffer.get_content();
+                                size_t idx = 0;
+                                int current_line = 1;
+                                while(idx < c.size() && current_line < line) {
+                                    if(c[idx] == '\n') current_line++;
+                                    idx++;
+                                }
+                                buffer.move_gap(idx);
+                                status_message = "Jumped to line " + search_query;
+                            } catch (...) { status_message = "Invalid number"; }
+                        }
+                        current_mode = Mode::Editor;
+                    } 
+                    else if (k == Key::Esc || k == Key::Ctrl_G) { current_mode = Mode::Editor; status_message = "Cancelled"; }
+                    else if (k == Key::Backspace || k == Key::Ctrl_H) { if (!search_query.empty()) search_query.pop_back(); }
+                    else if (isdigit((char)k)) search_query.push_back((char)k);
                 }
                 return;
             }
 
             
-            if (k == Key::Esc) { waiting_for_meta = true; status_message = "M-"; return; }
+            if (k == Key::Esc) { 
+                if (selection_anchor != std::string::npos) {
+                    selection_anchor = std::string::npos;
+                    status_message = "Selection Cancelled";
+                    return;
+                }
+                waiting_for_meta = true; status_message = "M-"; return; 
+            }
             if (waiting_for_meta) { process_meta(k); return; }
             if (waiting_for_chord) { process_chord(k); return; }
 
@@ -327,13 +380,30 @@ namespace honeymoon::kernel {
                         buffer.delete_range(selection_anchor, c); selection_anchor = std::string::npos; status_message = "Cut";
                     } else status_message = "No selection"; break;
                 case Key::Ctrl_Y: if(!clipboard.empty()) { buffer.insert_string(clipboard); status_message="Yank"; } else status_message="Empty"; break;
-                case Key::Enter: buffer.insert_char('\n'); break;
-                case Key::Backspace: case Key::Ctrl_H: buffer.delete_char(); break;
+                
+                case Key::Ctrl_A: move_line_start(); break;
+                case Key::Ctrl_E: move_line_end(); break;
+                case Key::Ctrl_K: kill_to_eol(); break;
+                case Key::Ctrl_L: recenter_view(); break;
+                case Key::Ctrl_T: transpose_chars(); break;
+                case Key::Ctrl_J: case Key::Enter: buffer.insert_char('\n'); break;
+                
+                case Key::Ctrl_S: current_mode = Mode::TextSearch; search_forward=true; search_start_idx=buffer.get_cursor(); search_query=""; status_message="I-Search: "; break;
+                case Key::Ctrl_R: current_mode = Mode::TextSearch; search_forward=false; search_start_idx=buffer.get_cursor(); search_query=""; status_message="I-Search Back: "; break;
+                
+                case Key::Tab: perform_indent(true); break;
+                case Key::ShiftTab: perform_indent(false); break;
+
+                case Key::Backspace: buffer.delete_char(); break; 
+                case Key::Ctrl_H: waiting_for_chord = true; last_ctrl_key = (int)k; status_message = "C-h"; break;
+
                 case Key::Del: buffer.delete_forward(); break;
                 case Key::ArrowUp: case Key::Ctrl_P: move_cursor_2d(-1, 0); break;
                 case Key::ArrowDown: case Key::Ctrl_N: move_cursor_2d(1, 0); break;
                 case Key::ArrowLeft: case Key::Ctrl_B: move_cursor_lin(-1); break;
                 case Key::ArrowRight: case Key::Ctrl_F: move_cursor_lin(1); break;
+                
+                case Key::Ctrl_Slash: // TODO: Undo check keycode
                 default: if (is_printable((int)k)) buffer.insert_char((char)k); break;
             }
         }
@@ -344,19 +414,56 @@ namespace honeymoon::kernel {
                 switch(k) {
                     case Key::Ctrl_C: should_quit = true; break;
                     case Key::Ctrl_S: buffer.save_to_file(current_filename); status_message = "Saved"; break;
+                    case Key::Ctrl_F: current_mode = Mode::FileSearch; search_query=""; status_message = "Find File: "; break;
+                    case Key::Ctrl_B: // Switch buffer -> Recent files?
+                    case static_cast<Key>('b'): current_mode = Mode::RecentFiles; menu_selection = 0; break;
+                     case static_cast<Key>('k'): // Kill buffer -> Close file
+                        current_filename = "[No Name]"; buffer = BufferPolicy(); current_mode = Mode::Home; status_message = "Buffer Closed"; break;
+                    case static_cast<Key>('h'): // Select All
+                        selection_anchor = 0;
+                        buffer.move_gap(buffer.size());
+                        status_message = "Select All";
+                        break; 
+                    case Key::Tab: 
+                         // Auto format - just indent all?
+                         status_message = "Auto-Format: Not Impl"; 
+                         break;
                     default: status_message = "Unknown Chord"; break;
                 }
+            } else if (last_ctrl_key == (int)Key::Ctrl_H) {
+                if ((char)k == 'k') { current_mode = Mode::Help; status_message = "Help: Describe Key"; }
+                else if ((char)k == 'f') { current_mode = Mode::Help; status_message = "Help: Describe Function"; }
+                else { status_message = "C-h cancelled"; }
             }
         }
     
         void process_meta(Key k) {
             waiting_for_meta = false; status_message = "";
-            if ((char)k == 'w') {
+            char c = (char)k;
+            if (c >= 'A' && c <= 'Z') c += 32; // lower case
+            
+            if (c == 'w') { // Copy
                  if (selection_anchor != std::string::npos) {
                     clipboard = buffer.get_range(selection_anchor, buffer.get_cursor());
                     selection_anchor = std::string::npos; status_message = "Copy";
                  } else status_message = "No selection";
-            } else status_message = "Unknown Meta";
+            } else if (c == 'b') { move_word_backward(); }
+            else if (c == 'f') { move_word_forward(); }
+            else if (c == 'd') { kill_word(); }
+            else if (c == 't') { transpose_words(); }
+            else if (c == 'g') { 
+                current_mode = Mode::GotoLine; 
+                search_query = ""; 
+                status_message = "Go to line: "; 
+            }
+            else if (c == 'h') {
+                 // Select paragraph.
+                 // Move to start of para, set anchor, move to end of para.
+                 // Para boundaries: empty lines.
+                 // Simplified: just select current paragraph.
+                 status_message = "Select Para: Todo";
+            }
+            else status_message = "Unknown Meta";
         }
         
         void move_cursor_lin(int off) {
@@ -376,6 +483,123 @@ namespace honeymoon::kernel {
             size_t eol = i; while (eol < c.size() && c[eol] != '\n') eol++;
             if (tc < 0) tc = 0; if (tc > (int)(eol - i)) tc = eol - i;
             buffer.move_gap(i + tc);
+        }
+
+        bool is_separator(char c) {
+            return std::isspace(c) || std::ispunct(c);
+        }
+
+        void move_word_forward() {
+            std::string c = buffer.get_content();
+            size_t idx = buffer.get_cursor();
+            if (idx >= c.size()) return;
+            while (idx < c.size() && is_separator(c[idx])) idx++;
+            while (idx < c.size() && !is_separator(c[idx])) idx++;
+            buffer.move_gap(idx);
+        }
+
+        void move_word_backward() {
+            size_t idx = buffer.get_cursor();
+            if (idx == 0) return;
+            std::string c = buffer.get_content();
+            idx--;
+            while (idx > 0 && is_separator(c[idx])) idx--;
+            while (idx > 0 && !is_separator(c[idx])) idx--;
+            if (is_separator(c[idx])) idx++; 
+            buffer.move_gap(idx);
+        }
+
+        void move_line_start() {
+            std::string c = buffer.get_content();
+            size_t idx = buffer.get_cursor();
+            while (idx > 0 && c[idx - 1] != '\n') idx--;
+            buffer.move_gap(idx);
+        }
+
+        void move_line_end() {
+            std::string c = buffer.get_content();
+            size_t idx = buffer.get_cursor();
+            while (idx < c.size() && c[idx] != '\n') idx++;
+            buffer.move_gap(idx);
+        }
+
+        void kill_to_eol() {
+            size_t start = buffer.get_cursor();
+            std::string c = buffer.get_content();
+            size_t end = start;
+            while (end < c.size() && c[end] != '\n') end++;
+            if (start == end && end < c.size()) end++; // Kill newline if empty
+            if (end > start) {
+                clipboard = buffer.get_range(start, end);
+                buffer.delete_range(start, end);
+                status_message = "Killed line";
+            }
+        }
+
+        void kill_word() {
+             size_t start = buffer.get_cursor();
+             move_word_forward();
+             size_t end = buffer.get_cursor();
+             if (end > start) {
+                 clipboard = buffer.get_range(start, end);
+                 buffer.delete_range(start, end);
+                 status_message = "Killed word";
+             }
+        }
+
+        void transpose_chars() {
+            size_t idx = buffer.get_cursor();
+            if (idx == 0 || buffer.size() < 2) return;
+            std::string c = buffer.get_content();
+            if (idx >= c.size()) idx--; // if at end, swap prev two
+            if (idx > 0) {
+                 char a = c[idx-1];
+                 char b = c[idx];
+                 buffer.delete_range(idx-1, idx+1);
+                 buffer.move_gap(idx-1);
+                 buffer.insert_char(b);
+                 buffer.insert_char(a);
+            }
+        }
+
+        void transpose_words() {
+            // Primitive implementation: swap current word with previous
+            // Getting this right is tricky, let's keep it simple.
+            // Find current word bounds
+            size_t orig = buffer.get_cursor();
+            // TODO: Proper Emacs style transpose is complex. 
+            // Simplified: move back word, kill word, move back word, paste, move forward word.
+            move_word_backward();
+            // size_t w2_start = buffer.get_cursor();
+            move_word_forward(); // w2_end
+            // size_t w2_end = buffer.get_cursor(); 
+            // that was not quite right if we were partly in a word.
+            // Let's defer this complex feature or do a simple char swap for now if words are too hard.
+            // Reverting to simple notify
+            status_message = "Transpose words not fully impl";
+            buffer.move_gap(orig);
+        }
+
+        void recenter_view() {
+            EditorCursor cur = get_visual_cursor();
+            scroll_row = std::max(0, cur.r - window_rows / 2);
+        }
+
+        void perform_indent(bool forward) {
+            // Simple tab insertion for now, or block indent if selection
+            if (selection_anchor != std::string::npos) {
+                // block indent
+                // size_t start = std::min(selection_anchor, buffer.get_cursor());
+                // size_t end = std::max(selection_anchor, buffer.get_cursor());
+                // TODO: indent lines in range
+                status_message = "Block indent todo";
+            } else {
+                if (forward) {
+                    for(int i=0; i<settings.tab_width; ++i) buffer.insert_char(' ');
+                } else {
+                    // dedent? difficult without selection or line start logic
+                }
+            }
         }
     };
 }

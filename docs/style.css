@@ -98,3 +98,12 @@ code {
     background-color: #f0f0f0;
     font-family: 'Courier New', Courier, monospace;
 }
+.key {
+    background-color: #eee;
+    border: 2px outset #ccc;
+    font-family: monospace;
+    padding: 2px 5px;
+    font-weight: bold;
+    font-size: 0.9em;
+    color: #000;
+}

@@ -6,7 +6,7 @@ TARGET = honeymoon
 
 all: $(TARGET)
 
-$(TARGET): $(SRC)
+$(TARGET): $(SRC) src/*.hpp
 	$(CXX) $(CXXFLAGS) -o $(TARGET) $(SRC)
 
 clean:
