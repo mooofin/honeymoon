@@ -103,13 +103,23 @@ namespace honeymoon::kernel {
             terminal.write_raw(output_buffer);
         }
 
+        int get_display_width(const std::string& s) {
+            int w = 0;
+            for (size_t i = 0; i < s.length(); ++i) {
+                unsigned char c = (unsigned char)s[i];
+                if ((c & 0xC0) != 0x80) w++; 
+            }
+            return w;
+        }
+
         void draw_logo(int start_y) {
             for (int i = 0; i < (int)logo_lines.size(); ++i) {
                 int y = start_y + i;
                 if (y >= window_rows) break;
                 output_buffer.append(std::format("\x1b[{};{}H", y + 1, 1));
                 std::string& msg = logo_lines[i];
-                int pad = (window_cols - msg.length()) / 2;
+                int width = get_display_width(msg);
+                int pad = (window_cols - width) / 2;
                 if (pad < 0) pad = 0;
                 output_buffer.append(std::string(pad, ' ')).append(msg);
             }
@@ -118,6 +128,7 @@ namespace honeymoon::kernel {
         void draw_centered_view() {
             // Draw Logo
             int logo_start_y = window_rows / 5;
+            if (logo_start_y < 1) logo_start_y = 1; // Ensure valid position
             draw_logo(logo_start_y);
 
             int menu_start_y = logo_start_y + logo_lines.size() + 2;
@@ -169,7 +180,8 @@ namespace honeymoon::kernel {
 
         void draw_centered_text(int y, const std::string& text) {
             if (y >= window_rows) return;
-            int pad = (window_cols - text.length()) / 2;
+            int width = get_display_width(text);
+            int pad = (window_cols - width) / 2;
              if (pad < 0) pad = 0;
             output_buffer.append(std::format("\x1b[{};{}H", y + 1, pad + 1)).append(text);
         }
@@ -210,7 +222,8 @@ namespace honeymoon::kernel {
                         int logo_row = y - logo_start_y;
                         if (logo_row >= 0 && logo_row < (int)logo_lines.size()) {
                             std::string& msg = logo_lines[logo_row];
-                            int pad = (window_cols - 5 - msg.length()) / 2;
+                            int width = get_display_width(msg);
+                            int pad = (window_cols - 5 - width) / 2;
                             if (pad > 0) output_buffer.append("~");
                             output_buffer.append(std::string(std::max(0, pad - 1), ' ')).append(msg);
                         } else { output_buffer.append("~"); }
