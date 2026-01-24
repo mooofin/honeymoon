@@ -53,5 +53,9 @@ make
 ## Controls
 
 If you know Vim, I’m sorry.
+<p align="center">
+  <img src="https://i.pinimg.com/originals/18/7b/6a/187b6a6387bb1cd2cd3a7a786d05ea7a.gif" alt="gif">
+</p>
+
 
 
