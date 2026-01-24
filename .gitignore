@@ -1,6 +1,6 @@
 *.log
 *.txt
-# Binaries
+
 honeymoon
 *.exe
 *.dll

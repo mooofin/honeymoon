@@ -1,7 +1,4 @@
-/*
- * The Kernel.
- * Policy-based design. 
- */
+
 #pragma once
 #include <string>
 #include <vector>
@@ -46,7 +43,7 @@ namespace honeymoon::kernel {
 
         void run() {
             while (!should_quit) { refresh_screen(); process_keypress(); }
-            terminal.write_raw("\x1b[2J\x1b[H"); // Cleanup
+            terminal.write_raw("\x1b[2J\x1b[H");
         }
 
     private:
@@ -74,7 +71,7 @@ namespace honeymoon::kernel {
             int tab_width = 4;
         } settings;
 
-        // Menu definitions
+        
         const std::vector<std::string> home_menu = {
             "File Searcher", "Recent Files", "Settings", "Help", "About", "Quit"
         };
@@ -113,22 +110,26 @@ namespace honeymoon::kernel {
         }
 
         void draw_logo(int start_y) {
+            int max_width = 0;
+            for (const auto& line : logo_lines) {
+                int w = get_display_width(line);
+                if (w > max_width) max_width = w;
+            }
+            int pad = (window_cols - max_width) / 2;
+            if (pad < 0) pad = 0;
+
             for (int i = 0; i < (int)logo_lines.size(); ++i) {
                 int y = start_y + i;
                 if (y >= window_rows) break;
                 output_buffer.append(std::format("\x1b[{};{}H", y + 1, 1));
-                std::string& msg = logo_lines[i];
-                int width = get_display_width(msg);
-                int pad = (window_cols - width) / 2;
-                if (pad < 0) pad = 0;
-                output_buffer.append(std::string(pad, ' ')).append(msg);
+                output_buffer.append(std::string(pad, ' ')).append(logo_lines[i]);
             }
         }
 
         void draw_centered_view() {
-            // Draw Logo
+            
             int logo_start_y = window_rows / 5;
-            if (logo_start_y < 1) logo_start_y = 1; // Ensure valid position
+            if (logo_start_y < 1) logo_start_y = 1; 
             draw_logo(logo_start_y);
 
             int menu_start_y = logo_start_y + logo_lines.size() + 2;
@@ -143,7 +144,8 @@ namespace honeymoon::kernel {
             } else if (current_mode == Mode::About) {
                 draw_centered_text(menu_start_y, "Honeymoon Editor v0.1");
                 draw_centered_text(menu_start_y + 2, "A minimal C++ editor.");
-                draw_centered_text(menu_start_y + 4, "Press Esc to return.");
+                draw_centered_text(menu_start_y + 4, "Made by Muffin");
+                draw_centered_text(menu_start_y + 6, "Press Esc to return.");
             } else if (current_mode == Mode::Help) {
                 draw_centered_text(menu_start_y, "Keys:");
                 draw_centered_text(menu_start_y + 1, "C-x C-c: Quit");
@@ -157,7 +159,7 @@ namespace honeymoon::kernel {
                      if (label == "Line Numbers") val = settings.show_line_numbers      ? " [ON] " : " [OFF]";
                      else if (label == "Syntax Highlighting") val = settings.syntax_highlighting ? " [ON] " : " [OFF]";
                      else if (label == "Tab Width") val = " [" + std::to_string(settings.tab_width) + "] ";
-                     else val = ""; // Back
+                     else val = "";
                      
                      if (i == menu_selection) output_buffer.append("\x1b[7m");
                      draw_centered_text(menu_start_y + i, label + val);
@@ -310,7 +312,7 @@ namespace honeymoon::kernel {
                 return;
             }
 
-            // Editor Mode Input Handling
+            
             if (k == Key::Esc) { waiting_for_meta = true; status_message = "M-"; return; }
             if (waiting_for_meta) { process_meta(k); return; }
             if (waiting_for_chord) { process_chord(k); return; }

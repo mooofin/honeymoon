@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Honeymoon Internals - Deep Dive</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <h1>Honeymoon System Internals</h1>
+
+    <div class="nav">
+        <a href="index.html" class="button">Home</a>
+        <a href="tutorial.html" class="button">Tutorial</a>
+        <a href="internals.html" class="button">Internals</a>
+        <a href="https://github.com/mooofin/honeymoon" class="button">Source Code</a>
+    </div>
+
+    <br>
+
+    <div
+        style="text-align: left; max-width: 800px; margin: 0 auto; background: #fff; border: 1px dotted #ccc; padding: 20px; font-family: 'Times New Roman', serif;">
+
+        <p><strong>Version:</strong> 0.1 (Alpha)<br>
+            <strong>Architecture:</strong> Monolithic Kernel (Editor Class)<br>
+            <strong>Language:</strong> C++20
+        </p>
+
+        <div style="text-align: center; margin: 20px 0;">
+            <img src="internals.gif" alt="Honeymoon Internals" style="max-width: 100%; border: 2px solid #000;">
+        </div>
+
+
+        <hr>
+
+        <h2>1. The Core Loop</h2>
+        <p>At its heart, Honeymoon runs a classic <strong>Read-Eval-Print Loop (REPL)</strong>, located in
+            <code>Editor::run()</code> within <code>src/editor.hpp</code>.
+        </p>
+        <pre><code>while (!should_quit) { 
+    refresh_screen(); 
+    process_keypress(); 
+}</code></pre>
+        <ul>
+            <li><strong>refresh_screen():</strong> Renders the entire state of the buffer to the terminal.</li>
+            <li><strong>process_keypress():</strong> Blocks until a key is received, then updates the state.</li>
+        </ul>
+        <p>Because we use <strong>Raw Mode</strong>, this loop happens after every single character you type, providing
+            an instant response time.</p>
+
+        <hr>
+
+        <h2>2. Terminal Discipline (Raw Mode)</h2>
+        <p><em>Source: <code>src/terminal.hpp</code></em></p>
+        <p>By default, terminals run in "Canonical Mode" (cooked mode), meaning input is buffered until you hit ENTER.
+            This is useless for a text editor. We manually switch the TTY driver to <strong>Raw Mode</strong> using the
+            <code>termios</code> struct.
+        </p>
+
+        <h3>Critical Flags Disabled:</h3>
+        <ul>
+            <li><code>ECHO</code>: We disable this so we can manually draw characters. If you type 'x', the terminal
+                won't show it until we say so.</li>
+            <li><code>ICANON</code>: Disables line buffering. We get input byte-by-byte.</li>
+            <li><code>ISIG</code>: Disables <code>Ctrl+C</code> and <code>Ctrl+Z</code> signals, so we can use them for
+                commands instead of killing the process.</li>
+            <li><code>IXON</code>: Disables <code>Ctrl+S</code>/<code>Ctrl+Q</code> flow control, freeing up
+                <code>Ctrl+S</code> for "Save".
+            </li>
+        </ul>
+
+        <div class="warning" style="font-size: 12px; padding: 5px;">
+            Note: If the program crashes without calling the destructor, your terminal will be stuck in Raw Mode. Type
+            `reset` blindly to fix it.
+        </div>
+
+        <hr>
+
+        <h2>3. Memory Management: The Gap Buffer</h2>
+        <p><em>Source: <code>src/buffer.hpp</code></em></p>
+        <p>Honeymoon does not use a <code>std::string</code> or a detailed Rope data structure. It uses a <strong>Gap
+                Buffer</strong>, simpler and cache-friendly.</p>
+
+        <p>A Gap Buffer is a dynamic array with a "hole" (the gap) that moves to the cursor position.</p>
+
+        <h3>Visualizing the Gap</h3>
+        <p><strong>State:</strong> Text is "HELLO", Cursor is after 'E'.</p>
+        <pre style="background: #eee; border: 1px solid #999; padding: 10px;">
+[ 'H', 'E',  _, _, _, _, _,  'L', 'L', 'O' ]
+          ^ Gap Start   ^ Gap End</pre>
+
+        <h3>Performance Characteristics:</h3>
+        <ul>
+            <li><strong>Insertion/Deletion at Cursor:</strong> <span style="color: blue;">O(1)</span>. We just fill the
+                gap.</li>
+            <li><strong>Moving Cursor:</strong> <span style="color: red;">O(N)</span>. We have to <code>memmove</code>
+                the gap to the new location.</li>
+        </ul>
+        <p>Since users typically type many characters in one place, the O(1) insertion dominates, making the editor feel
+            extremely responsive.</p>
+
+        <hr>
+
+        <h2>4. Zero-Flicker Rendering</h2>
+        <p>Refreshes are expensive. To prevent the screen from flashing or tearing, we employ a <strong>Double
+                Buffering</strong> strategy using <code>std::string output_buffer</code>.</p>
+
+        <ol>
+            <li><strong>Clear:</strong> We prepare the buffer with <code>\x1b[?25l</code> (Hide Cursor) and
+                <code>\x1b[H</code> (Home). Note: We rarely do a full clear <code>\x1b[2J</code> to avoid flicker; we
+                overwrite lines instead.
+            </li>
+            <li><strong>Draw:</strong> We iterate through the visible rows of the GapBuffer and append them to the
+                string.</li>
+            <li><strong>ANSI Coloring:</strong> Syntax highlighting is applied on-the-fly by injecting codes like
+                <code>\x1b[36m</code> (Cyan) for numbers.
+            </li>
+            <li><strong>Flush:</strong> Only when the entire frame is constructed do we call <code>write()</code> to
+                send the massive string to <code>STDOUT</code> in one syscall.</li>
+        </ol>
+
+        <hr>
+
+        <h2>5. Input Parsing</h2>
+        <p>We read input byte-by-byte. However, special keys (Arrows, Home, End) send <strong>Escape Sequences</strong>.
+        </p>
+        <p>Example: The <code>Up Arrow</code> key actually sends 3 bytes: <code>27</code> (Esc), <code>[</code>,
+            <code>A</code>.
+        </p>
+        <p>Our `read_key()` state machine detects the <code>27</code> byte and immediately peeks ahead to see if it's a
+            sequence. If it is, it maps it to our internal <code>Key::ArrowUp</code> enum. This allows us to handle
+            complex input transparently.</p>
+
+    </div>
+
+    <div class="footer">
+        <a href="https://github.com/mooofin">Contact the Author (mooofin)</a>
+    </div>
+</body>
+
+</html>
