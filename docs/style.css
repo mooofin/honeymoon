@@ -206,15 +206,16 @@ code {
 
 /* Tutorial Game Styles */
 #game-container {
-    background-color: #000;
-    color: #33ff33;
+    background-color: #f8f8f8;
+    color: #000000;
     font-family: 'Courier New', monospace;
     padding: 20px;
-    border: 5px inset #8A2BE2;
+    border: 4px ridge #8A2BE2;
     width: 600px;
     margin: 20px auto;
     text-align: left;
     position: relative;
+    box-shadow: 5px 5px 0px rgba(0, 0, 0, 0.2);
 }
 
 #game-screen {
@@ -225,8 +226,8 @@ code {
 }
 
 .cursor {
-    background-color: #33ff33;
-    color: #000;
+    background-color: #000000;
+    color: #ffffff;
     animation: blink 1s step-end infinite;
 }
 
@@ -237,8 +238,9 @@ code {
 }
 
 .level-info {
-    border-bottom: 1px dashed #33ff33;
-    margin-bottom: 10px;
+    border-bottom: 2px solid #8A2BE2;
+    margin-bottom: 15px;
     padding-bottom: 10px;
     font-weight: bold;
+    color: #4B0082;
 }

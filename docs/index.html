@@ -41,14 +41,153 @@
         <a href="https://github.com/mooofin/honeymoon" class="button">Source Code</a>
     </div>
 
-    <h2>Installation</h2>
-    <p>To install Honeymoon, download it and build it yourself. Don't be lazy.</p>
+    <!-- Browser Dojo Game -->
+    <div id="game-container">
+        <div class="level-info" id="level-info">Loading Dojo...</div>
+        <div id="game-screen"></div>
+        <div style="margin-top: 10px; font-size: 0.8em; color: #888;">Cannot type? Click here to focus.</div>
+    </div>
 
-    <pre>
-git clone https://github.com/mooofin/honeymoon.git
-cd honeymoon
-make
-./honeymoon</pre>
+    <script>
+        const levels = [
+            {
+                task: "Mission 1: Move cursor to the END of the line (Ctrl + E)",
+                text: "The treasure is at the end",
+                check: (state) => state.col === state.text.length,
+                confetti: "Nice! End of line reached."
+            },
+            {
+                task: "Mission 2: Move cursor to the START of the line (Ctrl + A)",
+                text: "The treasure is at the end",
+                setup: (state) => state.col = state.text.length,
+                check: (state) => state.col === 0,
+                confetti: "Boom! Back to start."
+            },
+            {
+                task: "Mission 3: Kill the word 'Bad' (Alt + D)",
+                text: "Good Bad Ugly",
+                setup: (state) => state.col = 5,
+                check: (state) => state.text === "Good  Ugly",
+                confetti: "Deleted! 'Bad' is gone."
+            },
+            {
+                task: "Mission 4: Kill to end of line (Ctrl + K)",
+                text: "Keep this. Delete that.",
+                setup: (state) => state.col = 11,
+                check: (state) => state.text === "Keep this. ",
+                confetti: "Clean sweep!"
+            },
+            {
+                task: "Mission 5: Fix the typo (Ctrl + T)",
+                text: "Teh quick brown fox",
+                setup: (state) => state.col = 3,
+                check: (state) => state.text === "The quick brown fox",
+                confetti: "Transposed! No more typos."
+            },
+            {
+                task: "Dojo Complete! You are a Honeymoon Master.",
+                text: "Press any key to restart.",
+                check: (state) => false,
+                confetti: "GG WP"
+            }
+        ];
+
+        let currentLevel = 0;
+        let state = { text: "", col: 0 };
+        const screen = document.getElementById('game-screen');
+        const info = document.getElementById('level-info');
+        const container = document.getElementById('game-container');
+
+        // Initial setup
+        function loadLevel(n) {
+            if (n >= levels.length) n = 0;
+            currentLevel = n;
+            let lvl = levels[currentLevel];
+            state.text = lvl.text;
+            state.col = 0;
+            if (lvl.setup) lvl.setup(state);
+            render();
+            info.innerText = lvl.task;
+        }
+
+        function render() {
+            let html = "";
+            for (let i = 0; i < state.text.length; i++) {
+                if (i === state.col) html += '<span class="cursor">' + state.text[i] + '</span>';
+                else html += state.text[i];
+            }
+            if (state.col === state.text.length) html += '<span class="cursor">&nbsp;</span>';
+            screen.innerHTML = html;
+        }
+
+        function checkWin() { // Simple check
+            if (levels[currentLevel].check(state)) {
+                info.innerText = levels[currentLevel].confetti;
+                info.style.color = "#FF00FF"; // Magenta
+                setTimeout(() => {
+                    info.style.color = "#4B0082"; // Indigo
+                    loadLevel(currentLevel + 1);
+                }, 1500);
+            }
+        }
+
+        container.addEventListener('click', () => container.focus());
+        container.setAttribute('tabindex', '0'); // Make focusable
+
+        container.addEventListener('keydown', (e) => {
+            e.preventDefault();
+            if (currentLevel === levels.length - 1) { loadLevel(0); return; }
+
+            // Emacs / Honeymoon bindings simulation
+            if (e.ctrlKey) {
+                switch (e.key.toLowerCase()) {
+                    case 'a': state.col = 0; break;
+                    case 'e': state.col = state.text.length; break;
+                    case 'f': state.col = Math.min(state.text.length, state.col + 1); break;
+                    case 'b': state.col = Math.max(0, state.col - 1); break;
+                    case 'k': state.text = state.text.substring(0, state.col); break;
+                    case 'd': // Delete char
+                        state.text = state.text.slice(0, state.col) + state.text.slice(state.col + 1);
+                        break;
+                    case 't': // Transpose
+                        if (state.col > 0 && state.col < state.text.length) {
+                            let arr = state.text.split('');
+                            let temp = arr[state.col - 1];
+                            arr[state.col - 1] = arr[state.col];
+                            arr[state.col] = temp;
+                            state.text = arr.join('');
+                            state.col++;
+                        }
+                        break;
+                }
+            } else if (e.altKey) {
+                switch (e.key.toLowerCase()) {
+                    case 'f': // Forward word
+                        while (state.col < state.text.length && state.text[state.col] === ' ') state.col++;
+                        while (state.col < state.text.length && state.text[state.col] !== ' ') state.col++;
+                        break;
+                    case 'b': // Back word
+                        while (state.col > 0 && state.text[state.col - 1] === ' ') state.col--;
+                        while (state.col > 0 && state.text[state.col - 1] !== ' ') state.col--;
+                        break;
+                    case 'd': // Kill word
+                        let end = state.col;
+                        while (end < state.text.length && state.text[end] === ' ') end++;
+                        while (end < state.text.length && state.text[end] !== ' ') end++;
+                        state.text = state.text.slice(0, state.col) + state.text.slice(end);
+                        break;
+                }
+            } else {
+                if (e.key === "ArrowRight") state.col = Math.min(state.text.length, state.col + 1);
+                else if (e.key === "ArrowLeft") state.col = Math.max(0, state.col - 1);
+            }
+
+            render();
+            checkWin();
+        });
+
+        loadLevel(0);
+    </script>
 
     <br><br>
 
