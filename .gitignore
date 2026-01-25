@@ -8,3 +8,6 @@ honeymoon
 releases/
 
 .honeymoon_history
+test_harness
+test_harness.exe
+*.o

@@ -10,4 +10,4 @@ $(TARGET): $(SRC) src/*.hpp
 	$(CXX) $(CXXFLAGS) -o $(TARGET) $(SRC)
 
 clean:
-	rm -f $(TARGET)
+	rm -f $(TARGET) test_harness test_harness.exe *.o src/*.o

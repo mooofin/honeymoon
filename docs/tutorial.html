@@ -54,13 +54,7 @@
                 check: (state) => state.text === "Keep this. ",
                 confetti: "Clean sweep!"
             },
-            {
-                task: "Mission 5: Fix the typo (Ctrl + T)",
-                text: "Teh quick brown fox",
-                setup: (state) => state.col = 3,
-                check: (state) => state.text === "The quick brown fox",
-                confetti: "Transposed! No more typos."
-            },
+
             {
                 task: "Dojo Complete! You are a Honeymoon Master.",
                 text: "Press any key to restart.",
@@ -126,16 +120,7 @@
                     case 'd': // Delete char
                         state.text = state.text.slice(0, state.col) + state.text.slice(state.col + 1);
                         break;
-                    case 't': // Transpose
-                        if (state.col > 0 && state.col < state.text.length) {
-                            let arr = state.text.split('');
-                            let temp = arr[state.col - 1];
-                            arr[state.col - 1] = arr[state.col];
-                            arr[state.col] = temp;
-                            state.text = arr.join('');
-                            state.col++;
-                        }
-                        break;
+
                 }
             } else if (e.altKey) {
                 switch (e.key.toLowerCase()) {
