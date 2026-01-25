@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Honeymoon Internals - Deep Dive</title>
+    <title>Honeymoon Internals</title>
     <link rel="stylesheet" href="style.css">
     <link rel="icon" type="image/jpeg" href="images/favicon.jpg">
 </head>
@@ -35,106 +35,140 @@
                 style="max-width: 100%; border: 2px solid #000;">
         </div>
 
+        <p>
+            I built Honeymoon because I wanted to see if I could make a usable text editor in C++ without using ncurses.
+            It turns out you can, but you have to do a lot of the plumbing yourself.
+        </p>
 
         <hr>
 
-        <h2>1. The Core Loop</h2>
-        <p>At its heart, Honeymoon runs a classic <strong>Read-Eval-Print Loop (REPL)</strong>, located in
-            <code>Editor::run()</code> within <code>src/editor.hpp</code>.
+        <h2>1. Why C++20?</h2>
+        <p><em>Source: <code>src/concepts.hpp</code>, <code>src/editor.hpp</code></em></p>
+        <p>
+            I used C++20 mainly for <strong>Concepts</strong>. If you've ever written template code in older C++, you
+            know the error messages are usually five pages of indecipherable garbage.
+        </p>
+
+        <h3>Concepts</h3>
+        <p>
+            Concepts let me define exactly what a `Buffer` needs to do. If I try to plug in a class that's missing a
+            method, the compiler tells me "Hey, you're missing `insert_char`," instead of exploding.
+        </p>
+        <pre><code>template&lt;typename B&gt;
+concept EditableBuffer = requires(B b) {
+    { b.load_from_file("") } -> std::same_as&lt;void&gt;;
+    // ...
+};</code></pre>
+
+        <p>
+            It also means I can swap out the buffer implementation later if I want to try a Rope or a Piece Table, as
+            long as it satisfies the concept.
+        </p>
+
+        <h3>Formatting</h3>
+        <p>
+            I also used <strong><code>std::format</code></strong>. It's basically Python's f-strings for C++. It handles
+            the ANSI escape sequences for moving the cursor much cleaner than `printf` or `cout` shifting.
+        </p>
+        <pre><code>// Much easier to read than cout &lt;&lt; "\x1b[" &lt;&lt; y &lt;&lt; ";" ...
+output_buffer.append(std::format("\x1b[{};{}H", y + 1, 1));</code></pre>
+
+        <hr>
+
+        <h2>2. The Loop</h2>
+        <p>
+            The editor is just a loop. It draws the screen, waits for you to press a key, and then processes it.
         </p>
         <pre><code>while (!should_quit) { 
     refresh_screen(); 
     process_keypress(); 
 }</code></pre>
-        <ul>
-            <li><strong>refresh_screen():</strong> Renders the entire state of the buffer to the terminal.</li>
-            <li><strong>process_keypress():</strong> Blocks until a key is received, then updates the state.</li>
-        </ul>
-        <p>Because we use <strong>Raw Mode</strong>, this loop happens after every single character you type, providing
-            an instant response time.</p>
+        <p>
+            `process_keypress()` blocks until input arrives. Since I disabled the terminal's line buffering, this
+            happens after every individual character.
+        </p>
 
         <hr>
 
-        <h2>2. Terminal Discipline (Raw Mode)</h2>
+        <h2>3. Raw Mode</h2>
         <p><em>Source: <code>src/terminal.hpp</code></em></p>
-        <p>By default, terminals run in "Canonical Mode" (cooked mode), meaning input is buffered until you hit ENTER.
-            This is useless for a text editor. We manually switch the TTY driver to <strong>Raw Mode</strong> using the
-            <code>termios</code> struct.
+        <p>
+            Terminals are designed to let you type a full line and hit Enter before sending it to the program. That
+            works for shells, but it breaks text editors.
         </p>
-
-        <h3>Critical Flags Disabled:</h3>
+        <p>
+            I use `termios` to switch the terminal into "Raw Mode". This turns off processing.
+        </p>
         <ul>
-            <li><code>ECHO</code>: We disable this so we can manually draw characters. If you type 'x', the terminal
-                won't show it until we say so.</li>
-            <li><code>ICANON</code>: Disables line buffering. We get input byte-by-byte.</li>
-            <li><code>ISIG</code>: Disables <code>Ctrl+C</code> and <code>Ctrl+Z</code> signals, so we can use them for
-                commands instead of killing the process.</li>
-            <li><code>IXON</code>: Disables <code>Ctrl+S</code>/<code>Ctrl+Q</code> flow control, freeing up
-                <code>Ctrl+S</code> for "Save".
-            </li>
+            <li><strong>No Echo:</strong> I don't want the terminal to print 'a' when I type 'a'. I want to decide where
+                to print it (or if I should print it at all).</li>
+            <li><strong>No Signals:</strong> I disabled `Ctrl+C` and `Ctrl+Z`. In a normal program, these kill or
+                suspend the process. Here, they are just valid key combinations I can bind to Copy or Undo.</li>
         </ul>
 
         <div class="warning" style="font-size: 12px; padding: 5px;">
-            Note: If the program crashes without calling the destructor, your terminal will be stuck in Raw Mode. Type
-            `reset` blindly to fix it.
+            If the program crashes, your terminal stays in raw mode. You won't see what you type. Type `reset` and hit
+            Enter to fix it.
         </div>
 
         <hr>
 
-        <h2>3. Memory Management: The Gap Buffer</h2>
+        <h2>4. Data Structure: Gap Buffer</h2>
         <p><em>Source: <code>src/buffer.hpp</code></em></p>
-        <p>Honeymoon does not use a <code>std::string</code> or a detailed Rope data structure. It uses a <strong>Gap
-                Buffer</strong>, simpler and cache-friendly.</p>
+        <p>
+            I didn't use a Rope. Ropes are efficient but complicated to implement. I used a <strong>Gap Buffer</strong>.
+        </p>
 
-        <p>A Gap Buffer is a dynamic array with a "hole" (the gap) that moves to the cursor position.</p>
-
-        <h3>Visualizing the Gap</h3>
-        <p><strong>State:</strong> Text is "HELLO", Cursor is after 'E'.</p>
+        <p>
+            It's a dynamic array with a gap in the middle. The gap sits at your cursor.
+        </p>
         <pre style="background: #eee; border: 1px solid #999; padding: 10px;">
-[ 'H', 'E',  _, _, _, _, _,  'L', 'L', 'O' ]
-          ^ Gap Start   ^ Gap End</pre>
+[ 'H', 'E',  _, _, _,  'L', 'L', 'O' ]
+          ^ Cursor </pre>
 
-        <h3>Performance Characteristics:</h3>
-        <ul>
-            <li><strong>Insertion/Deletion at Cursor:</strong> <span style="color: blue;">O(1)</span>. We just fill the
-                gap.</li>
-            <li><strong>Moving Cursor:</strong> <span style="color: red;">O(N)</span>. We have to <code>memmove</code>
-                the gap to the new location.</li>
-        </ul>
-        <p>Since users typically type many characters in one place, the O(1) insertion dominates, making the editor feel
-            extremely responsive.</p>
+        <p>
+            When you type, I just drop the character into the gap. That's O(1).
+            When you move the cursor, I have to move the gap. That involves copying memory, which is O(N).
+        </p>
+        <p>
+            This sounds slow, but `memmove` on modern CPUs is incredibly fast. For files under a few megabytes, you
+            simply cannot feel the latency. It's a trade-off I'm happy with for the simplicity.
+        </p>
 
         <hr>
 
-        <h2>4. Zero-Flicker Rendering</h2>
-        <p>Refreshes are expensive. To prevent the screen from flashing or tearing, we employ a <strong>Double
-                Buffering</strong> strategy using <code>std::string output_buffer</code>.</p>
-
-        <ol>
-            <li><strong>Clear:</strong> We prepare the buffer with <code>\x1b[?25l</code> (Hide Cursor) and
-                <code>\x1b[H</code> (Home). Note: We rarely do a full clear <code>\x1b[2J</code> to avoid flicker; we
-                overwrite lines instead.
-            </li>
-            <li><strong>Draw:</strong> We iterate through the visible rows of the GapBuffer and append them to the
-                string.</li>
-            <li><strong>ANSI Coloring:</strong> Syntax highlighting is applied on-the-fly by injecting codes like
-                <code>\x1b[36m</code> (Cyan) for numbers.
-            </li>
-            <li><strong>Flush:</strong> Only when the entire frame is constructed do we call <code>write()</code> to
-                send the massive string to <code>STDOUT</code> in one syscall.</li>
-        </ol>
+        <h2>5. Drawing</h2>
+        <p>
+            If you print directly to `cout`, you'll see the screen flicker as it repaints.
+        </p>
+        <p>
+            I use double buffering. I build the entire frame in a `std::string` first—cursor moves, colors, text—and
+            then write it to `stdout` in one go.
+        </p>
+        <p>
+            I also do simple syntax highlighting here. As I iterate over the characters to put them in the buffer, I
+            check if they are digits or quotes and wrap them in ANSI color codes. It's not a real parser, but it looks
+            nice enough.
+        </p>
 
         <hr>
 
-        <h2>5. Input Parsing</h2>
-        <p>We read input byte-by-byte. However, special keys (Arrows, Home, End) send <strong>Escape Sequences</strong>.
+        <h2>6. Input Parsing</h2>
+        <p>
+            The trickiest part is that special keys aren't one byte.
+            When you press `Up Arrow`, the terminal actually sends three bytes: `27` (Escape), `[`, and `A`.
         </p>
-        <p>Example: The <code>Up Arrow</code> key actually sends 3 bytes: <code>27</code> (Esc), <code>[</code>,
-            <code>A</code>.
+        <p>
+            My `read_key` function watches for byte `27`. If it sees one, it peeks at the next few bytes to see if it's
+            a known sequence. If it matches, I return a `Key::ArrowUp` enum. If not, I just return the Escape key.
         </p>
-        <p>Our `read_key()` state machine detects the <code>27</code> byte and immediately peeks ahead to see if it's a
-            sequence. If it is, it maps it to our internal <code>Key::ArrowUp</code> enum. This allows us to handle
-            complex input transparently.</p>
+
+        <hr>
+
+        <p>
+            That's the gist of it. It's not going to replace Vim, but building it explained a lot about how the tools I
+            use every day actually work.
+        </p>
 
     </div>
 
