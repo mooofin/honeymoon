@@ -4,14 +4,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Honeymoon Internals</title>
+    <title>Honeymoon Architecture</title>
     <link rel="stylesheet" href="style.css">
     <link rel="icon" type="image/jpeg" href="images/favicon.jpg">
 </head>
 
 <body>
 
-    <h1>Honeymoon System Internals</h1>
+    <h1>Honeymoon Architecture</h1>
 
     <div class="nav">
         <a href="index.html" class="button">Home</a>
@@ -26,154 +26,144 @@
         style="text-align: left; max-width: 800px; margin: 0 auto; background: #fff; border: 1px dotted #ccc; padding: 20px; font-family: 'Times New Roman', serif;">
 
         <p><strong>Version:</strong> 0.1 (Alpha)<br>
-            <strong>Architecture:</strong> Monolithic Kernel (Editor Class)<br>
-            <strong>Language:</strong> C++20
+            <strong>Standard:</strong> C++20
         </p>
 
         <div style="text-align: center; margin: 20px 0;">
-            <img src="images/internals_diagram.gif" alt="Honeymoon Internals"
+            <img src="images/internals_diagram.gif" alt="Honeymoon Architecture"
                 style="max-width: 100%; border: 2px solid #000;">
         </div>
 
         <p>
-            I built Honeymoon because I wanted to see if I could make a usable text editor in C++ without using ncurses.
-            It turns out you can, but you have to do a lot of the plumbing yourself.
+            Honeymoon is a terminal editor written in C++20. It bypasses libraries like ncurses to interact directly
+            with the terminal driver via <code>termios</code> and ANSI escape codes.
         </p>
 
         <hr>
 
-        <h2>1. Why C++20?</h2>
-        <p><em>Source: <code>src/concepts.hpp</code>, <code>src/editor.hpp</code></em></p>
+        <h2>1. Event Loop</h2>
         <p>
-            I used C++20 mainly for <strong>Concepts</strong>. If you've ever written template code in older C++, you
-            know the error messages are usually five pages of indecipherable garbage.
+            The core is a synchronous blocking loop. It renders the state to a memory buffer, flushes it to the
+            terminal, and waits for a single keypress.
         </p>
-
-        <h3>Concepts</h3>
-        <p>
-            Concepts let me define exactly what a `Buffer` needs to do. If I try to plug in a class that's missing a
-            method, the compiler tells me "Hey, you're missing `insert_char`," instead of exploding.
-        </p>
-        <pre><code>template&lt;typename B&gt;
-concept EditableBuffer = requires(B b) {
-    { b.load_from_file("") } -> std::same_as&lt;void&gt;;
-    // ...
-};</code></pre>
-
-        <p>
-            It also means I can swap out the buffer implementation later if I want to try a Rope or a Piece Table, as
-            long as it satisfies the concept.
-        </p>
-
-        <h3>Formatting</h3>
-        <p>
-            I also used <strong><code>std::format</code></strong>. It's basically Python's f-strings for C++. It handles
-            the ANSI escape sequences for moving the cursor much cleaner than `printf` or `cout` shifting.
-        </p>
-        <pre><code>// Much easier to read than cout &lt;&lt; "\x1b[" &lt;&lt; y &lt;&lt; ";" ...
-output_buffer.append(std::format("\x1b[{};{}H", y + 1, 1));</code></pre>
-
-        <hr>
-
-        <h2>2. The Loop</h2>
-        <p>
-            The editor is just a loop. It draws the screen, waits for you to press a key, and then processes it.
-        </p>
-        <pre><code>while (!should_quit) { 
-    refresh_screen(); 
-    process_keypress(); 
+        <pre><code class="language-cpp">// src/editor.hpp
+void run() {
+    while (!should_quit) { 
+        refresh_screen(); 
+        process_keypress(); 
+    }
+    terminal.write_raw("\x1b[2J\x1b[H"); // Clear on exit
 }</code></pre>
-        <p>
-            `process_keypress()` blocks until input arrives. Since I disabled the terminal's line buffering, this
-            happens after every individual character.
-        </p>
 
         <hr>
 
-        <h2>3. Raw Mode</h2>
-        <p><em>Source: <code>src/terminal.hpp</code></em></p>
+        <h2>2. Raw Mode & Termios</h2>
         <p>
-            Terminals are designed to let you type a full line and hit Enter before sending it to the program. That
-            works for shells, but it breaks text editors.
+            We disable Canonical Mode (line buffering) and Echo to take full control of the terminal. This allows us to
+            process every keystroke immediately.
         </p>
-        <p>
-            I use `termios` to switch the terminal into "Raw Mode". This turns off processing.
-        </p>
-        <ul>
-            <li><strong>No Echo:</strong> I don't want the terminal to print 'a' when I type 'a'. I want to decide where
-                to print it (or if I should print it at all).</li>
-            <li><strong>No Signals:</strong> I disabled `Ctrl+C` and `Ctrl+Z`. In a normal program, these kill or
-                suspend the process. Here, they are just valid key combinations I can bind to Copy or Undo.</li>
-        </ul>
+        <pre><code class="language-cpp">// src/terminal.hpp
+bool enable_raw_mode() {
+    tcgetattr(STDIN_FILENO, &orig_termios);
+    struct termios raw = orig_termios;
+    
+    // Disable signals (Ctrl-C/Z), canonical mode, and echo
+    raw.c_lflag &= ~(ECHO | ICANON | IEXTEN | ISIG);
+    
+    // Disable software flow control
+    raw.c_iflag &= ~(IXON);
+    
+    // Turn off output processing (e.g. \n -> \r\n translation)
+    raw.c_oflag &= ~(OPOST);
+    
+    return tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) != -1;
+}</code></pre>
 
         <div class="warning" style="font-size: 12px; padding: 5px;">
-            If the program crashes, your terminal stays in raw mode. You won't see what you type. Type `reset` and hit
-            Enter to fix it.
+            Note: If the process crashes without resetting these flags, the terminal remains broken. Use `reset` to
+            restore it.
         </div>
 
         <hr>
 
-        <h2>4. Data Structure: Gap Buffer</h2>
-        <p><em>Source: <code>src/buffer.hpp</code></em></p>
+        <h2>3. Gap Buffer</h2>
         <p>
-            I didn't use a Rope. Ropes are efficient but complicated to implement. I used a <strong>Gap Buffer</strong>.
-        </p>
-
-        <p>
-            It's a dynamic array with a gap in the middle. The gap sits at your cursor.
+            Text is stored in a <strong>Gap Buffer</strong>. This is a <code>std::vector</code> that maintains a "hole"
+            at the cursor position.
         </p>
         <pre style="background: #eee; border: 1px solid #999; padding: 10px;">
 [ 'H', 'E',  _, _, _,  'L', 'L', 'O' ]
-          ^ Cursor </pre>
+          ^ Cursor (Gap Start)   </pre>
 
         <p>
-            When you type, I just drop the character into the gap. That's O(1).
-            When you move the cursor, I have to move the gap. That involves copying memory, which is O(N).
+            Insertion is O(1) because we write into the gap. Moving the cursor is O(N) because we must shift the gap
+            using <code>memmove</code> (via <code>std::copy</code>).
         </p>
-        <p>
-            This sounds slow, but `memmove` on modern CPUs is incredibly fast. For files under a few megabytes, you
-            simply cannot feel the latency. It's a trade-off I'm happy with for the simplicity.
-        </p>
-
-        <hr>
-
-        <h2>5. Drawing</h2>
-        <p>
-            If you print directly to `cout`, you'll see the screen flicker as it repaints.
-        </p>
-        <p>
-            I use double buffering. I build the entire frame in a `std::string` first—cursor moves, colors, text—and
-            then write it to `stdout` in one go.
-        </p>
-        <p>
-            I also do simple syntax highlighting here. As I iterate over the characters to put them in the buffer, I
-            check if they are digits or quotes and wrap them in ANSI color codes. It's not a real parser, but it looks
-            nice enough.
-        </p>
+        <pre><code class="language-cpp">// src/buffer.hpp
+void move_gap(size_type position) {
+    if (position < gap_start) {
+        size_type move = gap_start - position;
+        std::copy(buffer.begin() + position, 
+                 buffer.begin() + gap_start, 
+                 buffer.begin() + gap_end - move);
+        gap_start -= move; gap_end -= move;
+    }
+    // ...
+}</code></pre>
 
         <hr>
 
-        <h2>6. Input Parsing</h2>
+        <h2>4. Double-Buffered Rendering</h2>
         <p>
-            The trickiest part is that special keys aren't one byte.
-            When you press `Up Arrow`, the terminal actually sends three bytes: `27` (Escape), `[`, and `A`.
+            To prevent tearing and flicker, we construct the entire frame in a <code>std::string</code> before making a
+            single <code>write</code> syscall.
         </p>
-        <p>
-            My `read_key` function watches for byte `27`. If it sees one, it peeks at the next few bytes to see if it's
-            a known sequence. If it matches, I return a `Key::ArrowUp` enum. If not, I just return the Escape key.
-        </p>
+        <pre><code class="language-cpp">// src/editor.hpp
+void refresh_screen() {
+    output_buffer.clear();
+    output_buffer.append("\x1b[?25l\x1b[H"); // Hide cursor, go home
+    
+    draw_rows();       // Render text content
+    draw_status_bar(); // Render UI
+    place_cursor();    // Move real terminal cursor
+    
+    output_buffer.append("\x1b[?25h"); // Show cursor
+    terminal.write_raw(output_buffer); // Atomic update
+}</code></pre>
 
         <hr>
 
+        <h2>5. Input Parsing</h2>
         <p>
-            That's the gist of it. It's not going to replace Vim, but building it explained a lot about how the tools I
-            use every day actually work.
+            Escape sequences (like Arrow Keys) are parsed manually. We detect the Escape byte (27) and look ahead.
         </p>
+        <pre><code class="language-cpp">// src/terminal.hpp
+Key read_key() {
+    char c;
+    if (read(STDIN_FILENO, &c, 1) != 1) return Key::None;
+    
+    if (c == 27) { // Escape sequence start
+        char seq[3];
+        if (read(STDIN_FILENO, &seq[0], 1) != 1) return Key::Esc;
+        if (read(STDIN_FILENO, &seq[1], 1) != 1) return Key::Esc;
+        
+        if (seq[0] == '[') {
+            switch (seq[1]) {
+                case 'A': return Key::ArrowUp;
+                case 'B': return Key::ArrowDown;
+                // ...
+            }
+        }
+        return Key::Esc;
+    }
+    return static_cast&lt;Key&gt;(c);
+}</code></pre>
 
     </div>
 
     <div class="footer">
         <a href="https://github.com/mooofin">Contact the Author (mooofin)</a>
+        <p>Out-sing, out-edit, out-slay.</p>
     </div>
 </body>
 
