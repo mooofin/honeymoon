@@ -10,12 +10,18 @@ Fast as fuck
 ## Features
 
 
-* **Visual Mode**
-  `Ctrl-Space` to mark. Move. `Ctrl-W` to cut.
-  Just like Emacs, but without the pinky pain.
-  (Okay, maybe some pinky pain.)
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/12d31b00-0e00-4a1f-a94c-39ae24d4250f" alt="honeymoon" />
+</p>
 
+**Visual Mode**
 
+- `Ctrl-Space` → mark  
+- move → expand selection  
+- `Ctrl-W` → cut  
+
+_Just like Emacs, but without the pinky pain._  
+_(Okay, maybe some pinky pain.)_
 
 
 ## Architecture
