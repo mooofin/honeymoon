@@ -58,4 +58,10 @@ If you know Vim, I’m sorry.
 </p>
 
 
+## The Update
 
+
+
+You can now map `Ctrl-Alt-Shift-Super-P` to `quit` if that makes you feel "productive." 
+
+I replaced the O(1) map lookups with tree traversals . I hope you're happy.
