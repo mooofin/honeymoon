@@ -3,7 +3,7 @@
 **FUCK VIM.**
 And Honeymoon doesn’t run a Lisp interpreter that eats 4GB of RAM on startup.
 
-A minimal, Emacs-inspired terminal text editor written in **C++20**.
+A minimal, Emacs-inspired terminal text editor written in **C++23**.
 
 Fast as fuck 
 
@@ -43,15 +43,15 @@ The code is split into three namespaces:
 
 ## Build
 
-You need a C++20 compiler and `make`.
+You need [Bazel](https://bazel.build/) and a C++23 compiler (Clang is configured by default).
 
-* Linux: you’re fine.
+* Linux: you're fine.
 * Windows: WSL or sm 
 
 
 ```bash
-make
-./honeymoon filename.txt
+bazel build //:honeymoon
+./bazel-bin/honeymoon filename.txt
 ```
 
 
