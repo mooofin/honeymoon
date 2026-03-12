@@ -226,58 +226,7 @@ private:
     root_node = std::make_shared<KeyNode>();
     current_node = root_node;
 
-    add_binding({Key::Ctrl_Space}, "mark_set");
-    add_binding({Key::Ctrl_G}, "cancel");
-    add_binding({Key::Ctrl_W}, "cut");
-    add_binding({Key::Ctrl_Y}, "yank");
-    add_binding({Key::Ctrl_A}, "move_line_start");
-    add_binding({Key::Ctrl_E}, "move_line_end");
-    add_binding({Key::Ctrl_K}, "kill_line");
-    add_binding({Key::Ctrl_L}, "recenter");
-    add_binding({Key::Ctrl_T}, "transpose_chars");
-    add_binding({Key::Ctrl_J}, "newline");
-    add_binding({Key::Enter}, "newline");
-    add_binding({Key::Ctrl_S}, "search_forward");
-    add_binding({Key::Ctrl_R}, "search_backward");
-    add_binding({Key::Tab}, "indent");
-    add_binding({Key::ShiftTab}, "dedent");
-    add_binding({Key::Backspace}, "delete_backward");
-    add_binding({Key::Del}, "delete_forward");
-    add_binding({Key::ArrowUp}, "move_up");
-    add_binding({Key::Ctrl_P}, "move_up");
-    add_binding({Key::ArrowDown}, "move_down");
-    add_binding({Key::Ctrl_N}, "move_down");
-    add_binding({Key::ArrowLeft}, "move_left");
-    add_binding({Key::Ctrl_B}, "move_left");
-    add_binding({Key::ArrowRight}, "move_right");
-    add_binding({Key::Ctrl_F}, "move_right");
-    add_binding({Key::Ctrl_Slash}, "undo");
-
-    add_binding({Key::Ctrl_X, Key::Ctrl_C}, "quit");
-    add_binding({Key::Ctrl_X, Key::Ctrl_S}, "save_file");
-    add_binding({Key::Ctrl_X, Key::Ctrl_F}, "find_file");
-    add_binding({Key::Ctrl_X, Key::Ctrl_B}, "list_buffers");
-    add_binding({Key::Ctrl_X, (Key)'b'}, "list_buffers");
-    add_binding({Key::Ctrl_X, (Key)'k'}, "kill_buffer");
-    add_binding({Key::Ctrl_X, (Key)'h'}, "select_all");
-
-    for (const auto &[key, act] : std::vector<std::pair<Key, std::string>>{
-             {(Key)'w', "copy"},
-             {(Key)'b', "move_word_backward"},
-             {(Key)'f', "move_word_forward"},
-             {(Key)'d', "kill_word"},
-             {(Key)'t', "transpose_words"},
-             {(Key)'g', "goto_line"}}) {
-      add_binding({Key::Esc, key}, act);
-      char c = (char)key;
-      if (c >= 'a' && c <= 'z') {
-        char upper = c - 32;
-        add_binding({Key::Esc, (Key)upper}, act);
-      }
-    }
-
-    add_binding({Key::Ctrl_H, (Key)'k'}, "help_key");
-    add_binding({Key::Ctrl_H, (Key)'f'}, "help_func");
+    // Load all keybindings from keybinds.moon
 
     load_custom_binds();
   }

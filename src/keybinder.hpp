@@ -42,7 +42,15 @@ public:
       Binding b;
       b.action = words.back();
       for (size_t i = 0; i < words.size() - 1; ++i) {
-        Key k = key_from_string(words[i]);
+        std::string token = words[i];
+        
+        // Handle M- prefix (Meta key = Esc + key)
+        if (token.size() >= 3 && token[0] == 'M' && token[1] == '-') {
+          b.keys.push_back(Key::Esc);
+          token = token.substr(2); // Remove "M-"
+        }
+        
+        Key k = key_from_string(token);
         if (k != Key::None)
           b.keys.push_back(k);
       }

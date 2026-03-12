@@ -1,152 +1,174 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Honeymoon Architecture</title>
+        <link rel="stylesheet" href="style.css" />
+        <link rel="icon" type="image/jpeg" href="images/favicon.jpg" />
+    </head>
 
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Honeymoon Architecture</title>
-    <link rel="stylesheet" href="style.css">
-    <link rel="icon" type="image/jpeg" href="images/favicon.jpg">
-</head>
+    <body>
+        <h1>Honeymoon Architecture</h1>
 
-<body>
-
-    <h1>Honeymoon Architecture</h1>
-
-    <div class="nav">
-        <a href="index.html" class="button">Home</a>
-        <a href="tutorial.html" class="button">Tutorial</a>
-        <a href="internals.html" class="button">Internals</a>
-        <a href="https://github.com/mooofin/honeymoon" class="button">Source Code</a>
-    </div>
-
-    <br>
-
-    <div
-        style="text-align: left; max-width: 800px; margin: 0 auto; background: #fff; border: 1px dotted #ccc; padding: 20px; font-family: 'Times New Roman', serif;">
-
-        <p><strong>Version:</strong> 0.1 (Alpha)<br>
-            <strong>Standard:</strong> C++20
-        </p>
-
-        <div style="text-align: center; margin: 20px 0;">
-            <img src="images/internals_diagram.gif" alt="Honeymoon Architecture"
-                style="max-width: 100%; border: 2px solid #000;">
+        <div class="nav">
+            <a href="index.html" class="button">Home</a>
+            <a href="tutorial.html" class="button">Tutorial</a>
+            <a href="internals.html" class="button">Internals</a>
+            <a href="https://github.com/mooofin/honeymoon" class="button"
+                >Source Code</a
+            >
         </div>
 
-        <p>
-            Honeymoon is a terminal editor written in C++20. It bypasses libraries like ncurses to interact directly
-            with the terminal driver via <code>termios</code> and ANSI escape codes.
-        </p>
+        <br />
 
-        <hr>
+        <div
+            style="
+                text-align: left;
+                max-width: 800px;
+                margin: 0 auto;
+                background: #fff;
+                border: 1px dotted #ccc;
+                padding: 20px;
+                font-family: &quot;Times New Roman&quot;, serif;
+            "
+        >
+            <p>
+                <strong>Version:</strong> 0.1 (Alpha)<br />
+                <strong>Standard:</strong> C++20
+            </p>
 
-        <h2>1. Event Loop</h2>
-        <p>
-            The core is a synchronous blocking loop. It renders the state to a memory buffer, flushes it to the
-            terminal, and waits for a single keypress.
-        </p>
-        <pre><code class="language-cpp">// src/editor.hpp
+            <div style="text-align: center; margin: 20px 0">
+                <img
+                    src="images/internals_diagram.gif"
+                    alt="Honeymoon Architecture"
+                    style="max-width: 100%; border: 2px solid #000"
+                />
+            </div>
+
+            <p>
+                Honeymoon is a terminal editor written in C++20. It bypasses
+                libraries like ncurses to interact directly with the terminal
+                driver via <code>termios</code> and ANSI escape codes.
+            </p>
+
+            <hr />
+
+            <h2>1. Event Loop</h2>
+            <p>
+                The core is a synchronous blocking loop. It renders the state to
+                a memory buffer, flushes it to the terminal, and waits for a
+                single keypress.
+            </p>
+            <pre><code class="language-cpp">// src/editor.hpp
 void run() {
-    while (!should_quit) { 
-        refresh_screen(); 
-        process_keypress(); 
+    while (!should_quit) {
+        refresh_screen();
+        process_keypress();
     }
     terminal.write_raw("\x1b[2J\x1b[H"); // Clear on exit
 }</code></pre>
 
-        <hr>
+            <hr />
 
-        <h2>2. Raw Mode & Termios</h2>
-        <p>
-            We disable Canonical Mode (line buffering) and Echo to take full control of the terminal. This allows us to
-            process every keystroke immediately.
-        </p>
-        <pre><code class="language-cpp">// src/terminal.hpp
+            <h2>2. Raw Mode & Termios</h2>
+            <p>
+                We disable Canonical Mode (line buffering) and Echo to take full
+                control of the terminal. This allows us to process every
+                keystroke immediately.
+            </p>
+            <pre><code class="language-cpp">// src/terminal.hpp
 bool enable_raw_mode() {
     tcgetattr(STDIN_FILENO, &orig_termios);
     struct termios raw = orig_termios;
-    
+
     // Disable signals (Ctrl-C/Z), canonical mode, and echo
     raw.c_lflag &= ~(ECHO | ICANON | IEXTEN | ISIG);
-    
+
     // Disable software flow control
     raw.c_iflag &= ~(IXON);
-    
+
     // Turn off output processing (e.g. \n -> \r\n translation)
     raw.c_oflag &= ~(OPOST);
-    
+
     return tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) != -1;
 }</code></pre>
 
-        <div class="warning" style="font-size: 12px; padding: 5px;">
-            Note: If the process crashes without resetting these flags, the terminal remains broken. Use `reset` to
-            restore it.
-        </div>
+            <div class="warning" style="font-size: 12px; padding: 5px">
+                Note: If the process crashes without resetting these flags, the
+                terminal remains broken. Use `reset` to restore it.
+            </div>
 
-        <hr>
+            <hr />
 
-        <h2>3. Gap Buffer</h2>
-        <p>
-            Text is stored in a <strong>Gap Buffer</strong>. This is a <code>std::vector</code> that maintains a "hole"
-            at the cursor position.
-        </p>
-        <pre style="background: #eee; border: 1px solid #999; padding: 10px;">
+            <h2>3. Gap Buffer</h2>
+            <p>
+                Text is stored in a <strong>Gap Buffer</strong>. This is a
+                <code>std::vector</code> that maintains a "hole" at the cursor
+                position.
+            </p>
+            <pre
+                style="background: #eee; border: 1px solid #999; padding: 10px"
+            >
 [ 'H', 'E',  _, _, _,  'L', 'L', 'O' ]
-          ^ Cursor (Gap Start)   </pre>
+          ^ Cursor (Gap Start)   </pre
+            >
 
-        <p>
-            Insertion is O(1) because we write into the gap. Moving the cursor is O(N) because we must shift the gap
-            using <code>memmove</code> (via <code>std::copy</code>).
-        </p>
-        <pre><code class="language-cpp">// src/buffer.hpp
+            <p>
+                Insertion is O(1) because we write into the gap. Moving the
+                cursor is O(N) because we must shift the gap using
+                <code>memmove</code> (via <code>std::copy</code>).
+            </p>
+            <pre><code class="language-cpp">// src/buffer.hpp
 void move_gap(size_type position) {
     if (position < gap_start) {
         size_type move = gap_start - position;
-        std::copy(buffer.begin() + position, 
-                 buffer.begin() + gap_start, 
+        std::copy(buffer.begin() + position,
+                 buffer.begin() + gap_start,
                  buffer.begin() + gap_end - move);
         gap_start -= move; gap_end -= move;
     }
     // ...
 }</code></pre>
 
-        <hr>
+            <hr />
 
-        <h2>4. Double-Buffered Rendering</h2>
-        <p>
-            To prevent tearing and flicker, we construct the entire frame in a <code>std::string</code> before making a
-            single <code>write</code> syscall.
-        </p>
-        <pre><code class="language-cpp">// src/editor.hpp
+            <h2>4. Double-Buffered Rendering</h2>
+            <p>
+                To prevent tearing and flicker, we construct the entire frame in
+                a <code>std::string</code> before making a single
+                <code>write</code> syscall.
+            </p>
+            <pre><code class="language-cpp">// src/editor.hpp
 void refresh_screen() {
     output_buffer.clear();
     output_buffer.append("\x1b[?25l\x1b[H"); // Hide cursor, go home
-    
+
     draw_rows();       // Render text content
     draw_status_bar(); // Render UI
     place_cursor();    // Move real terminal cursor
-    
+
     output_buffer.append("\x1b[?25h"); // Show cursor
     terminal.write_raw(output_buffer); // Atomic update
 }</code></pre>
 
-        <hr>
+            <hr />
 
-        <h2>5. Input Parsing</h2>
-        <p>
-            Escape sequences (like Arrow Keys) are parsed manually. We detect the Escape byte (27) and look ahead.
-        </p>
-        <pre><code class="language-cpp">// src/terminal.hpp
+            <h2>5. Input Parsing</h2>
+            <p>
+                Escape sequences (like Arrow Keys) are parsed manually. We
+                detect the Escape byte (27) and look ahead.
+            </p>
+            <pre><code class="language-cpp">// src/terminal.hpp
 Key read_key() {
     char c;
     if (read(STDIN_FILENO, &c, 1) != 1) return Key::None;
-    
+
     if (c == 27) { // Escape sequence start
         char seq[3];
         if (read(STDIN_FILENO, &seq[0], 1) != 1) return Key::Esc;
         if (read(STDIN_FILENO, &seq[1], 1) != 1) return Key::Esc;
-        
+
         if (seq[0] == '[') {
             switch (seq[1]) {
                 case 'A': return Key::ArrowUp;
@@ -159,12 +181,107 @@ Key read_key() {
     return static_cast&lt;Key&gt;(c);
 }</code></pre>
 
-    </div>
+            <hr />
 
-    <div class="footer">
-        <a href="https://github.com/mooofin">Contact the Author (mooofin)</a>
-        <p>Out-sing, out-edit, out-slay.</p>
-    </div>
-</body>
+            <h2>6. Keybinding System</h2>
+            <p>
+                Honeymoon uses a <strong>trie (prefix tree)</strong> to handle
+                multi-key chords like <code>C-x C-s</code>. All keybindings are
+                loaded from <code>keybinds.moon</code>, making them fully
+                customizable without recompilation.
+            </p>
 
+            <h3>Trie-Based Key Dispatch</h3>
+            <p>
+                Each node in the trie represents a key in the sequence. Leaf
+                nodes store action names that map to lambdas.
+            </p>
+            <pre><code class="language-cpp">// src/editor.hpp
+struct KeyNode {
+    std::map&lt;Key, std::shared_ptr&lt;KeyNode&gt;&gt; children;
+    std::string action;
+};
+
+void handle_input(EditorState &, Key k) {
+    auto it = current_node->children.find(k);
+    if (it != current_node->children.end()) {
+        current_node = it->second;
+        pending_keys.push_back(k);
+
+        if (!current_node->action.empty() && current_node->children.empty()) {
+            // Leaf node - execute action
+            actions[current_node->action]();
+            current_node = root_node;
+            pending_keys.clear();
+        }
+    }
+    // ...
+}</code></pre>
+
+            <h3>M- Prefix Expansion</h3>
+            <p>
+                The config parser expands <code>M-x</code> (Meta key) into
+                <code>[Esc, x]</code> automatically. This provides clean
+                Emacs-style syntax in the config file.
+            </p>
+            <pre><code class="language-cpp">// src/keybinder.hpp
+for (size_t i = 0; i &lt; words.size() - 1; ++i) {
+    std::string token = words[i];
+
+    // Handle M- prefix (Meta key = Esc + key)
+    if (token.size() &gt;= 3 && token[0] == 'M' && token[1] == '-') {
+        b.keys.push_back(Key::Esc);
+        token = token.substr(2); // Remove "M-"
+    }
+
+    Key k = key_from_string(token);
+    if (k != Key::None)
+        b.keys.push_back(k);
+}</code></pre>
+
+            <h3>Config File Format</h3>
+            <p>
+                <code>keybinds.moon</code> uses a simple whitespace-separated
+                format:
+            </p>
+            <pre
+                style="background: #eee; border: 1px solid #999; padding: 10px"
+            >
+# Comment lines start with #
+M-w copy                  # Meta-w copies selection
+C-x C-s save_file        # Chord: Ctrl-x then Ctrl-s
+C-g cancel               # Single key binding</pre
+            >
+
+            <p>Supported key formats:</p>
+            <ul style="text-align: left">
+                <li><code>C-x</code> → Ctrl+x</li>
+                <li><code>M-x</code> → Meta/Alt+x (expands to Esc then x)</li>
+                <li>
+                    <code>Enter</code>, <code>Tab</code>,
+                    <code>Backspace</code>, <code>Del</code>, <code>Esc</code>
+                </li>
+                <li>
+                    <code>Up</code>, <code>Down</code>, <code>Left</code>,
+                    <code>Right</code>
+                </li>
+                <li>
+                    Single characters: <code>a</code>, <code>Z</code>,
+                    <code>/</code>
+                </li>
+            </ul>
+
+            <div class="warning" style="font-size: 12px; padding: 5px">
+                All default keybindings are now in <code>keybinds.moon</code>.
+                Edit the file and restart the editor to apply changes.
+            </div>
+        </div>
+
+        <div class="footer">
+            <a href="https://github.com/mooofin"
+                >Contact the Author (mooofin)</a
+            >
+            <p>Out-sing, out-edit, out-slay.</p>
+        </div>
+    </body>
 </html>
