@@ -1,3 +1,39 @@
 build --cxxopt="-std=c++23"
+build --host_cxxopt="-std=c++23"
 build --repo_env=CC=clang
 build --repo_env=CXX=clang++
+
+build --cxxopt="-Wall"
+build --cxxopt="-Wextra"
+build --copt="-D_GNU_SOURCE"
+build --cxxopt="-fdiagnostics-color=always"
+build --noshow_progress
+
+build:fast --compilation_mode=fastbuild
+build:fast --cxxopt="-O1"
+build:fast --cxxopt="-g"
+
+build:release --compilation_mode=opt
+build:release --cxxopt="-O3"
+build:release --cxxopt="-DNDEBUG"
+build:release --cxxopt="-flto"
+build:release --linkopt="-flto"
+
+build:debug --compilation_mode=dbg
+build:debug --cxxopt="-O0"
+build:debug --cxxopt="-g3"
+build:debug --cxxopt="-fno-omit-frame-pointer"
+
+build:asan --strip=never
+build:asan --copt="-fsanitize=address"
+build:asan --copt="-O1"
+build:asan --copt="-fno-omit-frame-pointer"
+build:asan --linkopt="-fsanitize=address"
+
+build:ubsan --strip=never
+build:ubsan --copt="-fsanitize=undefined"
+build:ubsan --linkopt="-fsanitize=undefined"
+
+build:tsan --strip=never
+build:tsan --copt="-fsanitize=thread"
+build:tsan --linkopt="-fsanitize=thread"
