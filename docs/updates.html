@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Honeymoon - Updates</title>
+        <link rel="stylesheet" href="style.css" />
+        <link rel="icon" type="image/jpeg" href="images/favicon.jpg" />
+    </head>
+    <body>
+        <h1>What's New</h1>
+
+        <div class="nav">
+            <a href="index.html" class="button">Home</a>
+            <a href="tutorial.html" class="button">Guide</a>
+            <a href="internals.html" class="button">Internals</a>
+            <a href="updates.html" class="button">Updates</a>
+            <a href="https://github.com/mooofin/honeymoon" class="button">Source</a>
+        </div>
+
+        <br />
+
+        <div style="max-width: 800px; margin: 0 auto; text-align: left; background: #fff; border: 1px dotted #ccc; padding: 20px; font-family: 'Times New Roman', serif;">
+
+            <div style="margin-bottom: 40px;">
+                <h2 style="color: #8a2be2;">v0.1 - Bazel, Clang & C++23</h2>
+                <p style="color: #888; font-size: 0.85em;">commit <code>f38c2e5</code></p>
+                <ul>
+                    <li>Switched build system from Make/g++ to <strong>Bazel + Clang</strong></li>
+                    <li><code>WORKSPACE</code>, <code>MODULE.bazel</code>, <code>BUILD</code>, <code>.bazelrc</code> for Bazel 9</li>
+                    <li>C++23 enforced across the board via <code>.bazelrc</code></li>
+                    <li>Refactored editor mode system from enum + if-else mess to <strong><code>std::variant</code></strong> + <code>std::visit</code></li>
+                    <li>Adopted <code>std::views::split</code> for line rendering</li>
+                    <li>Fixed most-vexing-parse in Editor constructor (Clang strictness)</li>
+                    <li>Makefile still available as a fallback</li>
+                </ul>
+            </div>
+
+            <hr />
+
+            <div style="margin-bottom: 40px;">
+                <h2 style="color: #8a2be2;">v0.2 - Externalized Keybindings</h2>
+                <p style="color: #888; font-size: 0.85em;">commit <code>c1c8afd</code></p>
+                <ul>
+                    <li>Ripped all hardcoded keybindings out of <code>editor.hpp</code></li>
+                    <li>Created <strong><code>keybinds.moon</code></strong> - all 50+ bindings in one config file</li>
+                    <li>Added <strong><code>M-</code> prefix parsing</strong> (write <code>M-w</code> instead of <code>Esc w</code>)</li>
+                    <li><strong>Trie-based key dispatch</strong> for multi-key chords (<code>C-x C-s</code>)</li>
+                    <li>~60 lines of <code>add_binding()</code> calls removed from C++</li>
+                    <li>Bindings organized by category (movement, editing, file ops, search, etc.)</li>
+                    <li>Users can customize any keybinding without recompiling - just edit the file and restart</li>
+                </ul>
+            </div>
+
+            <hr />
+
+            <div style="margin-bottom: 20px;">
+                <h2 style="color: #8a2be2;">v0.3 - Build Cleanup</h2>
+                <p style="color: #888; font-size: 0.85em;">commit <code>a2a48ee</code></p>
+                <ul>
+                    <li><strong>Split build</strong> into <code>cc_library</code> (honeymoon_lib) + <code>cc_binary</code></li>
+                    <li>Cleaned up <code>.bazelrc</code> with build presets: <code>fast</code>, <code>release</code>, <code>debug</code>, <code>asan</code>, <code>ubsan</code>, <code>tsan</code></li>
+                    <li>Removed legacy <code>WORKSPACE</code> file, added <code>MODULE.bazel.lock</code></li>
+                    <li>Added editor unit tests (886-line test header)</li>
+                    <li>Library enables testing and reuse without rebuilding the binary</li>
+                </ul>
+            </div>
+
+        </div>
+
+        <div class="footer">
+            <a href="https://github.com/mooofin">Contact the Author (mooofin)</a>
+        </div>
+    </body>
+</html>

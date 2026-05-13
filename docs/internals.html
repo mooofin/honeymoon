@@ -15,8 +15,9 @@
             <a href="index.html" class="button">Home</a>
             <a href="tutorial.html" class="button">Tutorial</a>
             <a href="internals.html" class="button">Internals</a>
+            <a href="updates.html" class="button">Updates</a>
             <a href="https://github.com/mooofin/honeymoon" class="button"
-                >Source Code</a
+                >Source</a
             >
         </div>
 
@@ -35,7 +36,7 @@
         >
             <p>
                 <strong>Version:</strong> 0.1 (Alpha)<br />
-                <strong>Standard:</strong> C++20
+                <strong>Standard:</strong> C++23
             </p>
 
             <div style="text-align: center; margin: 20px 0">
@@ -47,7 +48,7 @@
             </div>
 
             <p>
-                Honeymoon is a terminal editor written in C++20. It bypasses
+                Honeymoon is a terminal editor written in C++23. It bypasses
                 libraries like ncurses to interact directly with the terminal
                 driver via <code>termios</code> and ANSI escape codes.
             </p>
@@ -274,6 +275,146 @@ C-g cancel               # Single key binding</pre
             <div class="warning" style="font-size: 12px; padding: 5px">
                 All default keybindings are now in <code>keybinds.moon</code>.
                 Edit the file and restart the editor to apply changes.
+            </div>
+
+            <hr />
+
+            <h2>7. State Machine (std::variant)</h2>
+            <p>
+                Instead of an enum + if-else spaghetti, Honeymoon uses
+                <strong><code>std::variant</code></strong> to represent the
+                editor's current mode. Each mode is a distinct struct with its
+                own state, and <code>std::visit</code> dispatches rendering and
+                input handling to the right overload.
+            </p>
+            <pre><code class="language-cpp">// src/editor.hpp
+struct HomeState       { int selection = 0; };
+struct EditorState     { std::string filename; };
+struct FileSearchState { std::string query; };
+struct TextSearchState { std::string query; size_t start_idx; bool forward; };
+struct GotoLineState   { std::string query; };
+struct SettingsState   { int selection = 0; };
+struct AboutState      {};
+
+using EditorMode =
+    std::variant&lt;HomeState, EditorState, FileSearchState,
+                 TextSearchState, GotoLineState, SettingsState,
+                 HelpState, AboutState&gt;;</code></pre>
+
+            <p>Rendering is dispatched via a generic visitor:</p>
+            <pre><code class="language-cpp">void refresh_screen() {
+    auto render_visitor = [this](auto &state) {
+        using T = std::decay_t&lt;decltype(state)&gt;;
+        if constexpr (std::is_same_v&lt;T, EditorState&gt; ||
+                      std::is_same_v&lt;T, TextSearchState&gt;) {
+            draw_rows();
+            draw_status_bar();
+        } else {
+            draw_centered_view();
+        }
+    };
+    std::visit(render_visitor, mode);
+}</code></pre>
+
+            <p>Each mode has its own <code>handle_input()</code> overload, keeping concerns isolated:</p>
+            <pre><code class="language-cpp">void handle_input(EditorState &amp;state, Key k) { /* trie dispatch */ }
+void handle_input(HomeState &amp;state, Key k)  { /* menu navigation */ }
+void handle_input(TextSearchState &amp;state, Key k) { /* incremental search */ }
+void handle_input(GotoLineState &amp;state, Key k)  { /* line number input */ }</code></pre>
+
+            <hr />
+
+            <h2>8. Tree-Sitter Syntax Highlighting</h2>
+            <p>
+                Syntax highlighting is provided by <strong>Tree-sitter</strong>,
+                loaded at runtime via <code>dlopen</code>. This avoids a
+                compile-time dependency - if the libraries aren't
+                installed, the editor falls back to a simple built-in
+                highlighter (digits in cyan, strings in green).
+            </p>
+
+            <h3>Dynamic Loading</h3>
+            <p>
+                The <code>TreeSitterHighlighter</code> class dlopen's three
+                shared libraries:
+            </p>
+            <ul style="text-align: left;">
+                <li><code>libtree-sitter.so</code> - core parser API</li>
+                <li><code>libtree-sitter-c.so</code> - C grammar</li>
+                <li><code>libtree-sitter-cpp.so</code> - C++ grammar</li>
+            </ul>
+            <p>
+                All 12+ Tree-sitter API functions are resolved via
+                <code>dlsym</code> into a function-pointer struct.
+            </p>
+            <pre><code class="language-cpp">// src/treesitter.hpp
+struct Api {
+    ts_parser_new_fn              ts_parser_new;
+    ts_parser_delete_fn           ts_parser_delete;
+    ts_parser_set_language_fn     ts_parser_set_language;
+    ts_parser_parse_string_fn     ts_parser_parse_string;
+    ts_tree_delete_fn             ts_tree_delete;
+    ts_tree_root_node_fn          ts_tree_root_node;
+    ts_node_type_fn               ts_node_type;
+    // ...
+} api_;
+
+bool load_api() {
+    lib_tree_sitter_ = dlopen("libtree-sitter.so", RTLD_NOW | RTLD_LOCAL);
+    api_.ts_parser_new = dlsym(lib_tree_sitter_, "ts_parser_new");
+    // ...
+}</code></pre>
+
+            <h3>Highlight Classification</h3>
+            <p>
+                Tree-sitter node types are mapped to a <code>HighlightKind</code>
+                enum using pattern matching (exact match, prefix, substring):
+            </p>
+            <pre><code class="language-cpp">enum class HighlightKind {
+    None, Comment, String, Number,
+    Keyword, Type, Function, Preprocessor,
+};
+
+static HighlightKind classify_node(std::string_view node_type) {
+    static constexpr Rule rules[] = {
+        {"comment",            HighlightKind::Comment,      Rule::Substring},
+        {"string",             HighlightKind::String,       Rule::Substring},
+        {"number_literal",     HighlightKind::Number,       Rule::Substring},
+        {"if_statement",       HighlightKind::Keyword,      Rule::Exact},
+        {"type_identifier",    HighlightKind::Type,         Rule::Substring},
+        // ...
+    };
+    // ...
+}</code></pre>
+
+            <h3>Per-Byte Style Map</h3>
+            <p>
+                After parsing, the syntax tree is flattened into a
+                <code>std::vector&lt;HighlightKind&gt;</code> with one entry per
+                byte. When spans overlap, a priority system picks the most
+                specific kind. The renderer then queries
+                <code>kind_at(byte_index)</code> for each character.
+            </p>
+            <pre><code class="language-cpp">void collect_styles() {
+    TSNode root = api_.ts_tree_root_node(tree_);
+    // DFS over syntax tree, collect non-None spans
+    for (auto &[start, end, kind] : spans) {
+        for (size_t i = start; i &lt; end; ++i) {
+            if (priority(kind) &gt;= priority(style_map_[i]))
+                style_map_[i] = kind;
+        }
+    }
+}
+
+HighlightKind kind_at(size_t byte_index) const noexcept {
+    if (byte_index &gt;= style_map_.size()) return HighlightKind::None;
+    return style_map_[byte_index];
+}</code></pre>
+
+            <div class="warning" style="font-size: 12px; padding: 5px">
+                Tree-sitter is optional. If the shared libraries aren't found,
+                the editor silently falls back to a naive highlighter that
+                colors digits and string quotes. No crash, no fuss.
             </div>
         </div>
 

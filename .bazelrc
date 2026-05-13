@@ -5,6 +5,7 @@ build --repo_env=CXX=clang++
 
 build --cxxopt="-Wall"
 build --cxxopt="-Wextra"
+build --cxxopt="-Wno-unused-lambda-capture"
 build --copt="-D_GNU_SOURCE"
 build --cxxopt="-fdiagnostics-color=always"
 build --noshow_progress

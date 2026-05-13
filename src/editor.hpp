@@ -3,7 +3,9 @@
 #include "input.hpp"
 #include "keybinder.hpp"
 #include "logo.hpp"
+#include "treesitter.hpp"
 #include <algorithm>
+#include <cctype>
 #include <concepts>
 #include <expected>
 #include <format>
@@ -76,6 +78,7 @@ public:
     buffer.load_from_file(filename);
     status_message = "Opened " + filename;
     mode = EditorState{filename};
+    syntax_engine.set_language_for_file(filename);
     honeymoon::util::add_to_history(recent_files, filename);
     honeymoon::util::save_history(".honeymoon_history", recent_files);
   }
@@ -103,6 +106,7 @@ private:
   std::vector<std::string> logo_lines;
   EditorMode mode;
   std::vector<std::string> recent_files;
+  honeymoon::syntax::TreeSitterHighlighter syntax_engine;
 
   std::map<std::string, std::function<void()>> actions;
 
@@ -435,15 +439,61 @@ private:
     return {cursor, r, c};
   }
 
+  const char *color_for_tree_sitter(honeymoon::syntax::HighlightKind kind) {
+    using honeymoon::syntax::HighlightKind;
+    switch (kind) {
+    case HighlightKind::Comment:
+      return "\x1b[90m";
+    case HighlightKind::String:
+      return "\x1b[32m";
+    case HighlightKind::Number:
+      return "\x1b[36m";
+    case HighlightKind::Keyword:
+      return "\x1b[35m";
+    case HighlightKind::Type:
+      return "\x1b[34m";
+    case HighlightKind::Function:
+      return "\x1b[33m";
+    case HighlightKind::Preprocessor:
+      return "\x1b[95m";
+    case HighlightKind::None:
+      return nullptr;
+    }
+    return nullptr;
+  }
+
   void draw_rows() {
     std::string content = buffer.get_content();
+    bool using_tree_sitter = false;
+    if (settings.syntax_highlighting &&
+        syntax_engine.set_language_for_file(current_filename)) {
+      syntax_engine.update(content);
+      using_tree_sitter = syntax_engine.active();
+    }
     auto lines_view = content | std::views::split('\n');
     auto cur = get_visual_cursor();
 
+    // Vertical scroll
     if (cur.r < (int)scroll_row)
       scroll_row = cur.r;
     if (cur.r >= (int)scroll_row + window_rows)
       scroll_row = cur.r - window_rows + 1;
+
+    // Horizontal scroll (account for line-number gutter: 5 chars)
+    int visible_cols = window_cols - 5;
+    if (visible_cols < 1) visible_cols = 1;
+    if (cur.c < (int)scroll_col)
+      scroll_col = cur.c;
+    if (cur.c >= (int)scroll_col + visible_cols)
+      scroll_col = cur.c - visible_cols + 1;
+
+    // Precompute absolute byte offset for each line (O(n) once)
+    std::vector<size_t> line_offsets;
+    line_offsets.push_back(0);
+    for (size_t i = 0; i < content.size(); ++i) {
+      if (content[i] == '\n')
+        line_offsets.push_back(i + 1);
+    }
 
     int y = 0;
     for (auto line : lines_view | std::views::drop(scroll_row) |
@@ -457,23 +507,20 @@ private:
         output_buffer.append(" ");
 
       std::string_view line_view(line.data(), line.size());
-      if (line_view.size() > (size_t)(window_cols - 5))
-        line_view = line_view.substr(0, window_cols - 5);
+      size_t line_start_abs = (file_row < line_offsets.size())
+                                  ? line_offsets[file_row]
+                                  : 0;
 
-      size_t line_start_abs = 0;
-      size_t current_abs = 0;
-      int line_count = 0;
-      for (auto l : lines_view) {
-        if (line_count == (int)file_row) {
-          line_start_abs = current_abs;
-          break;
-        }
-        current_abs += std::ranges::distance(l) + 1; // +1 for \n
-        line_count++;
-      }
+      // Apply horizontal scroll
+      if (scroll_col < line_view.size())
+        line_view = line_view.substr(scroll_col);
+      else
+        line_view = line_view.substr(0, 0);
+      if (line_view.size() > (size_t)visible_cols)
+        line_view = line_view.substr(0, visible_cols);
 
       for (size_t i = 0; i < line_view.size(); ++i) {
-        size_t abs = line_start_abs + i;
+        size_t abs = line_start_abs + scroll_col + i;
         bool sel = (selection_anchor != std::string::npos &&
                     abs >= std::min(selection_anchor, buffer.get_cursor()) &&
                     abs < std::max(selection_anchor, buffer.get_cursor()));
@@ -481,18 +528,27 @@ private:
           output_buffer.append("\x1b[7m");
 
         char c = line_view[i];
+        bool had_syntax_style = false;
         if (settings.syntax_highlighting) {
-          if (isdigit(c) && !sel)
-            output_buffer.append("\x1b[36m");
-          else if (c == '"' && !sel)
-            output_buffer.append("\x1b[32m");
+          if (!sel && using_tree_sitter) {
+            auto kind = syntax_engine.kind_at(abs);
+            if (const char *style = color_for_tree_sitter(kind)) {
+              output_buffer.append(style);
+              had_syntax_style = true;
+            }
+          } else if (!sel) {
+            if (std::isdigit(static_cast<unsigned char>(c))) {
+              output_buffer.append("\x1b[36m");
+              had_syntax_style = true;
+            } else if (c == '"') {
+              output_buffer.append("\x1b[32m");
+              had_syntax_style = true;
+            }
+          }
         }
 
         output_buffer.append(1, c);
-        if (settings.syntax_highlighting) {
-          if (sel || isdigit(c) || c == '"')
-            output_buffer.append("\x1b[m");
-        } else if (sel)
+        if (sel || had_syntax_style)
           output_buffer.append("\x1b[m");
       }
 
@@ -524,8 +580,8 @@ private:
   }
 
   void draw_status_bar() {
-    std::string stat = std::format("File: {} ", current_filename,
-                                   buffer.is_dirty() ? "[+]" : "");
+    std::string stat = std::format("File: {}{} ", current_filename,
+                                    buffer.is_dirty() ? " [+]" : "");
     std::string rstat =
         std::format("{}/{}", get_visual_cursor().r + 1, buffer.size());
     size_t len = stat.length(), rlen = rstat.length();
@@ -549,12 +605,13 @@ private:
 
   void place_cursor() {
     EditorCursor cur = get_visual_cursor();
-    int r = cur.r - scroll_row, c = cur.c - scroll_col;
+    int r = cur.r - scroll_row, c = cur.c - (int)scroll_col;
     if (r < 0)
       r = 0;
     if (r >= window_rows)
       r = window_rows - 1;
-    output_buffer.append(std::format("\x1b[{};{}H", r + 1, c + 1 + 5));
+    int gutter = settings.show_line_numbers ? 5 : 1;
+    output_buffer.append(std::format("\x1b[{};{}H", r + 1, c + 1 + gutter));
   }
 
   void process_keypress() {
@@ -900,11 +957,47 @@ private:
   }
 
   void transpose_words() {
-    size_t orig = buffer.get_cursor();
-    move_word_backward();
-    move_word_forward();
-    status_message = "Transpose words not fully impl";
-    buffer.move_gap(orig);
+    std::string c = buffer.get_content();
+    size_t cur = buffer.get_cursor();
+
+    // Find word-2 end: scan backward from cursor past separator(s) then word
+    size_t word2_end = cur;
+    while (word2_end > 0 && is_separator(c[word2_end - 1]))
+      word2_end--;
+    size_t word2_start = word2_end;
+    while (word2_start > 0 && !is_separator(c[word2_start - 1]))
+      word2_start--;
+
+    // Find word-1: scan backward from word-2 past separators
+    size_t word1_end = word2_start;
+    while (word1_end > 0 && is_separator(c[word1_end - 1]))
+      word1_end--;
+    size_t word1_start = word1_end;
+    while (word1_start > 0 && !is_separator(c[word1_start - 1]))
+      word1_start--;
+
+    if (word1_start >= word2_start || word1_start == word1_end ||
+        word2_start == word2_end) {
+      status_message = "Not enough words";
+      return;
+    }
+
+    // Extract the three segments
+    std::string word1 = buffer.get_range(word1_start, word1_end);
+    std::string sep = buffer.get_range(word1_end, word2_start);
+    std::string word2 = buffer.get_range(word2_start, word2_end);
+
+    // Delete both words + separator, re-insert swapped
+    buffer.delete_range(word1_start, word2_end);
+    buffer.move_gap(word1_start);
+    buffer.insert_string(word2);
+    buffer.insert_string(sep);
+    buffer.insert_string(word1);
+
+    // Place cursor after the transposed pair
+    buffer.move_gap(word1_start + word2.size() + sep.size() + word1.size());
+
+    status_message = "Transposed words";
   }
 
   void recenter_view() {
@@ -920,6 +1013,27 @@ private:
         for (int i = 0; i < settings.tab_width; ++i)
           buffer.insert_char(' ');
       } else {
+        // Dedent: remove up to tab_width spaces from line start
+        std::string c = buffer.get_content();
+        size_t cur = buffer.get_cursor();
+        size_t line_start = cur;
+        while (line_start > 0 && c[line_start - 1] != '\n')
+          line_start--;
+
+        size_t spaces = 0;
+        while (line_start + spaces < c.size() &&
+               c[line_start + spaces] == ' ' &&
+               (int)spaces < settings.tab_width)
+          spaces++;
+
+        if (spaces > 0) {
+          buffer.delete_range(line_start, line_start + spaces);
+          size_t cursor_adj = std::min(spaces, cur - line_start);
+          buffer.move_gap(cur - cursor_adj);
+          status_message = "Dedented";
+        } else {
+          status_message = "No indent to remove";
+        }
       }
     }
   }

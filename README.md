@@ -45,6 +45,12 @@ The code is split into three namespaces:
 
 You need [Bazel](https://bazel.build/) and a C++23 compiler (Clang is configured by default).
 
+Optional for C/C++ Tree-sitter highlighting at runtime:
+
+* `libtree-sitter`
+* `libtree-sitter-c`
+* `libtree-sitter-cpp`
+
 * Linux: you're fine.
 * Windows: WSL or sm 
 

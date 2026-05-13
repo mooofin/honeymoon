@@ -15,6 +15,7 @@ cc_library(
         "src/keybinder.hpp",
         "src/logo.hpp",
         "src/terminal.hpp",
+        "src/treesitter.hpp",
     ],
     includes = ["src"],
 )
@@ -24,4 +25,5 @@ cc_binary(
     name = "honeymoon",
     srcs = ["src/main.cpp"],
     deps = [":honeymoon_lib"],
+    linkopts = ["-ldl"],
 )
