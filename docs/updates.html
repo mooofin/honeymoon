@@ -23,6 +23,23 @@
         <div style="max-width: 800px; margin: 0 auto; text-align: left; background: #fff; border: 1px dotted #ccc; padding: 20px; font-family: 'Times New Roman', serif;">
 
             <div style="margin-bottom: 40px;">
+                <h2 style="color: #8a2be2;">v0.5 - Config Mixin, Undo/Redo & Working Settings</h2>
+                <p style="color: #888; font-size: 0.85em;">commit <code>6815087</code></p>
+                <ul>
+                    <li>Extracted Config from a nested struct into a proper CRTP-compatible mixin (<code>Editor : private Config, private UndoHistory&lt;&gt;</code>)</li>
+                    <li>Settings persist to <code>~/.config/honeymoon/config.moon</code> with XDG-aware path resolution and automatic directory creation</li>
+                    <li>Full key set (<code>tab_width</code>, <code>show_line_numbers</code>, <code>syntax_highlighting</code>, <code>color_theme</code>, <code>scroll_offset</code>, <code>font_size</code>) serializes as clean key value pairs with <code>#</code> comment support</li>
+                    <li><strong>UndoHistory&lt;&gt;</strong> mixin brings snapshot-based undo/redo with contiguous-typing coalescing (typing gate so <code>hello</code> is one undo step)</li>
+                    <li>Every buffer-mutating path snapshots before touching state (<code>cut</code>, <code>yank</code>, <code>kill_line</code>, <code>kill_word</code>, <code>transpose_chars/words</code>, <code>indent/dedent</code>, <code>delete_forward/backward</code>, <code>newline</code>)</li>
+                    <li>Undo/redo applies via <code>delete_range(0, size()) + insert_string</code> (O(n) restore, O(1) snapshot)</li>
+                    <li>Bound <code>C-/</code> &rarr; undo, <code>M-/</code> &rarr; redo</li>
+                    <li>Settings screen actually works: arrow keys navigate, Enter toggles booleans, Tab Width cycles 2&rarr;4&rarr;8, and every change auto-saves</li>
+                </ul>
+            </div>
+
+            <hr />
+
+            <div style="margin-bottom: 40px;">
                 <h2 style="color: #8a2be2;">v0.4 - Tree-Sitter, Horizontal Scroll & Docs</h2>
                 <p style="color: #888; font-size: 0.85em;">commit <code>2721aac</code></p>
                 <ul>
