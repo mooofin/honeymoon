@@ -71,8 +71,9 @@ C-l recenter
 C-h k help_key
 C-h f help_func
 
-# === Undo (not yet implemented) ===
+# === Undo / Redo ===
 C-/ undo
+M-/ redo
 
 # === Custom Bindings ===
 # Add your own keybindings below this line

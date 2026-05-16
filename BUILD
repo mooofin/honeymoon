@@ -9,6 +9,7 @@ cc_library(
     hdrs = [
         "src/buffer.hpp",
         "src/concepts.hpp",
+        "src/config.hpp",
         "src/editor.hpp",
         "src/history.hpp",
         "src/input.hpp",
@@ -16,6 +17,7 @@ cc_library(
         "src/logo.hpp",
         "src/terminal.hpp",
         "src/treesitter.hpp",
+        "src/undo.hpp",
     ],
     includes = ["src"],
 )

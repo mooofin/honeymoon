@@ -1,4 +1,6 @@
 #include "concepts.hpp"
+#include "config.hpp"
+#include "undo.hpp"
 #include "history.hpp"
 #include "input.hpp"
 #include "keybinder.hpp"
@@ -53,11 +55,13 @@ using EditorMode =
 
 template <typename BufferPolicy, typename TerminalPolicy>
   requires EditableBuffer<BufferPolicy> && TerminalDevice<TerminalPolicy>
-class Editor {
+class Editor : private honeymoon::config::Config,
+               private honeymoon::mem::UndoHistory<> {
 public:
   Editor() : output_buffer("") {
     update_window_size();
     bind_default_keys();
+    load();
     std::stringstream ss{std::string(honeymoon::STARTUP_LOGO)};
     std::string line;
     while (std::getline(ss, line)) {
@@ -142,6 +146,7 @@ private:
     };
     actions["cut"] = [this]() {
       if (selection_anchor != std::string::npos) {
+        snapshot_for_undo(buffer.get_content(), buffer.get_cursor());
         size_t c = buffer.get_cursor();
         clipboard = buffer.get_range(selection_anchor, c);
         buffer.delete_range(selection_anchor, c);
@@ -152,6 +157,7 @@ private:
     };
     actions["yank"] = [this]() {
       if (!clipboard.empty()) {
+        snapshot_for_undo(buffer.get_content(), buffer.get_cursor());
         buffer.insert_string(clipboard);
         status_message = "Yank";
       } else
@@ -162,7 +168,10 @@ private:
     actions["kill_line"] = [this]() { kill_to_eol(); };
     actions["recenter"] = [this]() { recenter_view(); };
     actions["transpose_chars"] = [this]() { transpose_chars(); };
-    actions["newline"] = [this]() { buffer.insert_char('\n'); };
+    actions["newline"] = [this]() {
+      snapshot_for_undo(buffer.get_content(), buffer.get_cursor());
+      buffer.insert_char('\n');
+    };
     actions["search_forward"] = [this]() {
       mode = TextSearchState{
           .query = "", .start_idx = buffer.get_cursor(), .forward = true};
@@ -175,13 +184,46 @@ private:
     };
     actions["indent"] = [this]() { perform_indent(true); };
     actions["dedent"] = [this]() { perform_indent(false); };
-    actions["delete_backward"] = [this]() { buffer.delete_char(); };
-    actions["delete_forward"] = [this]() { buffer.delete_forward(); };
+    actions["delete_backward"] = [this]() {
+      snapshot_for_undo(buffer.get_content(), buffer.get_cursor());
+      buffer.delete_char();
+    };
+    actions["delete_forward"] = [this]() {
+      snapshot_for_undo(buffer.get_content(), buffer.get_cursor());
+      buffer.delete_forward();
+    };
     actions["move_up"] = [this]() { move_cursor_2d(-1, 0); };
     actions["move_down"] = [this]() { move_cursor_2d(1, 0); };
     actions["move_left"] = [this]() { move_cursor_lin(-1); };
     actions["move_right"] = [this]() { move_cursor_lin(1); };
-    actions["undo"] = [this]() { status_message = "Undo not impl"; };
+    actions["undo"] = [this]() {
+      std::string cur = buffer.get_content();
+      size_t cur_cursor = buffer.get_cursor();
+      auto result = apply_undo(cur, cur_cursor);
+      if (result) {
+        buffer.delete_range(0, buffer.size());
+        buffer.move_gap(0);
+        buffer.insert_string(result->content);
+        buffer.move_gap(result->cursor);
+        status_message = "Undo";
+      } else {
+        status_message = "Nothing to undo";
+      }
+    };
+    actions["redo"] = [this]() {
+      std::string cur = buffer.get_content();
+      size_t cur_cursor = buffer.get_cursor();
+      auto result = apply_redo(cur, cur_cursor);
+      if (result) {
+        buffer.delete_range(0, buffer.size());
+        buffer.move_gap(0);
+        buffer.insert_string(result->content);
+        buffer.move_gap(result->cursor);
+        status_message = "Redo";
+      } else {
+        status_message = "Nothing to redo";
+      }
+    };
 
     actions["copy"] = [this]() {
       if (selection_anchor != std::string::npos) {
@@ -230,7 +272,7 @@ private:
     root_node = std::make_shared<KeyNode>();
     current_node = root_node;
 
-    // Load all keybindings from keybinds.moon
+
 
     load_custom_binds();
   }
@@ -255,11 +297,6 @@ private:
     }
   }
 
-  struct EditorSettings {
-    bool show_line_numbers = true;
-    bool syntax_highlighting = true;
-    int tab_width = 4;
-  } settings;
 
   const std::vector<std::string> home_menu = {
       "File Searcher", "Recent Files", "Settings", "Help", "About", "Quit"};
@@ -373,11 +410,11 @@ private:
       std::string label = settings_menu[i];
       std::string val;
       if (label == "Line Numbers")
-        val = settings.show_line_numbers ? " [ON] " : " [OFF]";
+        val = show_line_numbers ? " [ON] " : " [OFF]";
       else if (label == "Syntax Highlighting")
-        val = settings.syntax_highlighting ? " [ON] " : " [OFF]";
+        val = syntax_highlighting ? " [ON] " : " [OFF]";
       else if (label == "Tab Width")
-        val = " [" + std::to_string(settings.tab_width) + "] ";
+        val = " [" + std::to_string(tab_width) + "] ";
 
       if (i == state.selection)
         output_buffer.append("\x1b[7m");
@@ -465,7 +502,7 @@ private:
   void draw_rows() {
     std::string content = buffer.get_content();
     bool using_tree_sitter = false;
-    if (settings.syntax_highlighting &&
+    if (syntax_highlighting &&
         syntax_engine.set_language_for_file(current_filename)) {
       syntax_engine.update(content);
       using_tree_sitter = syntax_engine.active();
@@ -473,13 +510,13 @@ private:
     auto lines_view = content | std::views::split('\n');
     auto cur = get_visual_cursor();
 
-    // Vertical scroll
+
     if (cur.r < (int)scroll_row)
       scroll_row = cur.r;
     if (cur.r >= (int)scroll_row + window_rows)
       scroll_row = cur.r - window_rows + 1;
 
-    // Horizontal scroll (account for line-number gutter: 5 chars)
+
     int visible_cols = window_cols - 5;
     if (visible_cols < 1) visible_cols = 1;
     if (cur.c < (int)scroll_col)
@@ -487,7 +524,7 @@ private:
     if (cur.c >= (int)scroll_col + visible_cols)
       scroll_col = cur.c - visible_cols + 1;
 
-    // Precompute absolute byte offset for each line (O(n) once)
+
     std::vector<size_t> line_offsets;
     line_offsets.push_back(0);
     for (size_t i = 0; i < content.size(); ++i) {
@@ -500,7 +537,7 @@ private:
                          std::views::take(window_rows)) {
       size_t file_row = y + scroll_row;
 
-      if (settings.show_line_numbers)
+      if (show_line_numbers)
         output_buffer.append(
             std::format("\x1b[36m{:4} \x1b[39m", file_row + 1));
       else
@@ -511,7 +548,7 @@ private:
                                   ? line_offsets[file_row]
                                   : 0;
 
-      // Apply horizontal scroll
+
       if (scroll_col < line_view.size())
         line_view = line_view.substr(scroll_col);
       else
@@ -529,7 +566,7 @@ private:
 
         char c = line_view[i];
         bool had_syntax_style = false;
-        if (settings.syntax_highlighting) {
+        if (syntax_highlighting) {
           if (!sel && using_tree_sitter) {
             auto kind = syntax_engine.kind_at(abs);
             if (const char *style = color_for_tree_sitter(kind)) {
@@ -556,7 +593,7 @@ private:
       y++;
     }
 
-    // Fill remaining rows with ~
+
     for (; y < window_rows; y++) {
       if (content.empty()) {
         int logo_start_y = window_rows / 3;
@@ -610,7 +647,7 @@ private:
       r = 0;
     if (r >= window_rows)
       r = window_rows - 1;
-    int gutter = settings.show_line_numbers ? 5 : 1;
+    int gutter = show_line_numbers ? 5 : 1;
     output_buffer.append(std::format("\x1b[{};{}H", r + 1, c + 1 + gutter));
   }
 
@@ -641,6 +678,7 @@ private:
         current_node = root_node;
         pending_keys.clear();
         status_message = "";
+        close_typing_group();
         if (actions.count(act))
           actions[act]();
         else
@@ -659,6 +697,7 @@ private:
         pending_keys.clear();
       } else {
         if (is_printable((int)k) && k != Key::Esc) {
+          snapshot_for_undo(buffer.get_content(), buffer.get_cursor());
           buffer.insert_char((char)k);
           status_message = "";
         } else {
@@ -717,7 +756,7 @@ private:
 
   void handle_input(HomeState &state, Key k) {
     if (k == Key::Esc) {
-      mode = EditorState{current_filename}; // Escapes from home ehe
+      mode = EditorState{current_filename};
       return;
     }
 
@@ -813,13 +852,39 @@ private:
       state.query.push_back((char)k);
   }
 
-  void handle_input(SettingsState &, Key k) {
+  void handle_input(SettingsState &state, Key k) {
     if (k == Key::Esc) {
       mode = HomeState{};
       return;
     }
-    // will add more settings here , currently thinking of ways to get the
-    // template heavy code or split it across some files
+    if (k == Key::ArrowUp || k == Key::Ctrl_P) {
+      state.selection--;
+      if (state.selection < 0)
+        state.selection = settings_menu.size() - 1;
+    } else if (k == Key::ArrowDown || k == Key::Ctrl_N) {
+      state.selection++;
+      if (state.selection >= (int)settings_menu.size())
+        state.selection = 0;
+    } else if (k == Key::Enter) {
+      std::string sel = settings_menu[state.selection];
+      if (sel == "Line Numbers") {
+        show_line_numbers = !show_line_numbers;
+        save();
+      } else if (sel == "Syntax Highlighting") {
+        syntax_highlighting = !syntax_highlighting;
+        save();
+      } else if (sel == "Tab Width") {
+        if (tab_width == 2)
+          tab_width = 4;
+        else if (tab_width == 4)
+          tab_width = 8;
+        else
+          tab_width = 2;
+        save();
+      } else if (sel == "Back") {
+        mode = HomeState{};
+      }
+    }
   }
 
   void handle_input(HelpState &, Key k) {
@@ -914,6 +979,7 @@ private:
   }
 
   void kill_to_eol() {
+    snapshot_for_undo(buffer.get_content(), buffer.get_cursor());
     size_t start = buffer.get_cursor();
     std::string c = buffer.get_content();
     size_t end = start;
@@ -929,6 +995,7 @@ private:
   }
 
   void kill_word() {
+    snapshot_for_undo(buffer.get_content(), buffer.get_cursor());
     size_t start = buffer.get_cursor();
     move_word_forward();
     size_t end = buffer.get_cursor();
@@ -940,6 +1007,7 @@ private:
   }
 
   void transpose_chars() {
+    snapshot_for_undo(buffer.get_content(), buffer.get_cursor());
     size_t idx = buffer.get_cursor();
     if (idx == 0 || buffer.size() < 2)
       return;
@@ -957,10 +1025,11 @@ private:
   }
 
   void transpose_words() {
+    snapshot_for_undo(buffer.get_content(), buffer.get_cursor());
     std::string c = buffer.get_content();
     size_t cur = buffer.get_cursor();
 
-    // Find word-2 end: scan backward from cursor past separator(s) then word
+
     size_t word2_end = cur;
     while (word2_end > 0 && is_separator(c[word2_end - 1]))
       word2_end--;
@@ -968,7 +1037,7 @@ private:
     while (word2_start > 0 && !is_separator(c[word2_start - 1]))
       word2_start--;
 
-    // Find word-1: scan backward from word-2 past separators
+
     size_t word1_end = word2_start;
     while (word1_end > 0 && is_separator(c[word1_end - 1]))
       word1_end--;
@@ -982,19 +1051,19 @@ private:
       return;
     }
 
-    // Extract the three segments
+
     std::string word1 = buffer.get_range(word1_start, word1_end);
     std::string sep = buffer.get_range(word1_end, word2_start);
     std::string word2 = buffer.get_range(word2_start, word2_end);
 
-    // Delete both words + separator, re-insert swapped
+
     buffer.delete_range(word1_start, word2_end);
     buffer.move_gap(word1_start);
     buffer.insert_string(word2);
     buffer.insert_string(sep);
     buffer.insert_string(word1);
 
-    // Place cursor after the transposed pair
+
     buffer.move_gap(word1_start + word2.size() + sep.size() + word1.size());
 
     status_message = "Transposed words";
@@ -1006,14 +1075,15 @@ private:
   }
 
   void perform_indent(bool forward) {
+    snapshot_for_undo(buffer.get_content(), buffer.get_cursor());
     if (selection_anchor != std::string::npos) {
       status_message = "Block indent todo";
     } else {
       if (forward) {
-        for (int i = 0; i < settings.tab_width; ++i)
+        for (int i = 0; i < tab_width; ++i)
           buffer.insert_char(' ');
       } else {
-        // Dedent: remove up to tab_width spaces from line start
+
         std::string c = buffer.get_content();
         size_t cur = buffer.get_cursor();
         size_t line_start = cur;
@@ -1023,7 +1093,7 @@ private:
         size_t spaces = 0;
         while (line_start + spaces < c.size() &&
                c[line_start + spaces] == ' ' &&
-               (int)spaces < settings.tab_width)
+               (int)spaces < tab_width)
           spaces++;
 
         if (spaces > 0) {
@@ -1038,4 +1108,4 @@ private:
     }
   }
 };
-} // namespace honeymoon::kernel
+}
