@@ -1,8 +1,9 @@
 #pragma once
 #include <cstdlib>
-#include <fstream>
-#include <sstream>
+#include <cstring>
 #include <string>
+#include <fcntl.h>
+#include <unistd.h>
 #include <sys/stat.h>
 
 namespace honeymoon::config {
@@ -12,28 +13,26 @@ struct Config {
   bool syntax_highlighting = true;
   int tab_width = 4;
   int scroll_offset = 0;
-  std::string color_theme = "default";
   int font_size = 12;
 
+  static bool file_exists(const std::string& path) {
+    int fd = open(path.c_str(), O_RDONLY);
+    if (fd < 0) return false;
+    close(fd);
+    return true;
+  }
+
   static std::string find_path() {
-    {
-      std::ifstream f("./.honeymoonrc");
-      if (f.is_open())
-        return "./.honeymoonrc";
-    }
+    if (file_exists("./.honeymoonrc")) return "./.honeymoonrc";
     const char *xdg = std::getenv("XDG_CONFIG_HOME");
     if (xdg && xdg[0]) {
       std::string p = std::string(xdg) + "/honeymoon/config.moon";
-      std::ifstream f(p);
-      if (f.is_open())
-        return p;
+      if (file_exists(p)) return p;
     }
     const char *home = std::getenv("HOME");
     if (home && home[0]) {
       std::string p = std::string(home) + "/.config/honeymoon/config.moon";
-      std::ifstream f(p);
-      if (f.is_open())
-        return p;
+      if (file_exists(p)) return p;
     }
     return "";
   }
@@ -50,34 +49,36 @@ struct Config {
 
   bool load() {
     std::string path = find_path();
-    if (path.empty())
-      return false;
-    std::ifstream f(path);
-    if (!f.is_open())
-      return false;
-    std::string line;
-    while (std::getline(f, line)) {
-      size_t comment = line.find('#');
-      if (comment != std::string::npos)
-        line = line.substr(0, comment);
-      if (line.empty())
-        continue;
-      std::stringstream ss(line);
-      std::string key, val;
-      if (!(ss >> key >> val))
-        continue;
-      if (key == "tab_width")
-        tab_width = std::stoi(val);
-      else if (key == "show_line_numbers")
-        show_line_numbers = (val == "true");
-      else if (key == "syntax_highlighting")
-        syntax_highlighting = (val == "true");
-      else if (key == "color_theme")
-        color_theme = val;
-      else if (key == "scroll_offset")
-        scroll_offset = std::stoi(val);
-      else if (key == "font_size")
-        font_size = std::stoi(val);
+    if (path.empty()) return false;
+    int fd = open(path.c_str(), O_RDONLY);
+    if (fd < 0) return false;
+    char buf[4096];
+    ssize_t n = read(fd, buf, sizeof(buf) - 1);
+    close(fd);
+    if (n <= 0) return false;
+    buf[n] = '\0';
+    char* p = buf;
+    while (*p) {
+      char* nl = (char*)memchr(p, '\n', (buf + n) - p);
+      if (!nl) nl = buf + n;
+      *nl = '\0';
+      char* line = p;
+      p = nl + 1;
+      char* comment = (char*)memchr(line, '#', nl - line);
+      if (comment) *comment = '\0';
+      char* sp = (char*)memchr(line, ' ', nl - line);
+      if (!sp) { char* tab = (char*)memchr(line, '\t', nl - line); sp = tab; }
+      if (!sp) continue;
+      *sp = '\0';
+      char* key = line;
+      char* val = sp + 1;
+      if (!*key || !*val) continue;
+      if (strcmp(key, "tab_width") == 0)
+        tab_width = atoi(val);
+      else if (strcmp(key, "show_line_numbers") == 0)
+        show_line_numbers = (strcmp(val, "true") == 0);
+      else if (strcmp(key, "syntax_highlighting") == 0)
+        syntax_highlighting = (strcmp(val, "true") == 0);
     }
     return true;
   }
@@ -89,18 +90,18 @@ struct Config {
       std::string dir = path.substr(0, slash);
       mkdir(dir.c_str(), 0755);
     }
-    std::ofstream f(path);
-    if (!f.is_open())
-      return false;
-    f << "# Honeymoon Configuration\n";
-    f << "tab_width " << tab_width << "\n";
-    f << "show_line_numbers " << (show_line_numbers ? "true" : "false")
-      << "\n";
-    f << "syntax_highlighting " << (syntax_highlighting ? "true" : "false")
-      << "\n";
-    f << "color_theme " << color_theme << "\n";
-    f << "scroll_offset " << scroll_offset << "\n";
-    f << "font_size " << font_size << "\n";
+    int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) return false;
+    char buf[512];
+    int len = snprintf(buf, sizeof(buf),
+      "# Honeymoon Configuration\n"
+      "tab_width %d\n"
+      "show_line_numbers %s\n"
+      "syntax_highlighting %s\n",
+      tab_width, show_line_numbers ? "true" : "false",
+      syntax_highlighting ? "true" : "false");
+    if (len > 0) (void)write(fd, buf, len);
+    close(fd);
     return true;
   }
 };

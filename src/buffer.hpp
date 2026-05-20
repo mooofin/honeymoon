@@ -5,9 +5,10 @@
 #pragma once
 #include <vector>
 #include <string>
-#include <fstream>
 #include <algorithm>
-#include <memory>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/stat.h>
 #include "concepts.hpp"
 
 namespace honeymoon::mem {
@@ -27,22 +28,25 @@ namespace honeymoon::mem {
         ~GapBuffer() = default;
 
         void load_from_file(const std::string& filename) {
-            std::ifstream file(filename, std::ios::binary);
-            if (!file.is_open()) return;
-            file.seekg(0, std::ios::end);
-            size_type size = file.tellg();
-            file.seekg(0, std::ios::beg);
+            int fd = open(filename.c_str(), O_RDONLY);
+            if (fd < 0) return;
+            struct stat st;
+            if (fstat(fd, &st) < 0) { close(fd); return; }
+            size_type size = st.st_size;
             buffer.resize(size + DEFAULT_GAP_SIZE);
-            file.read(reinterpret_cast<char*>(buffer.data()), size);
+            ssize_t n = read(fd, buffer.data(), size);
+            close(fd);
+            if (n < 0 || (size_type)n != size) { buffer.resize(DEFAULT_GAP_SIZE); gap_start = 0; gap_end = DEFAULT_GAP_SIZE; return; }
             gap_start = size;
             gap_end = buffer.size();
         }
 
         void save_to_file(const std::string& filename) {
-            std::ofstream file(filename, std::ios::binary);
-            if (!file.is_open()) return;
-            if (gap_start > 0) file.write(reinterpret_cast<const char*>(buffer.data()), gap_start);
-            if (gap_end < buffer.size()) file.write(reinterpret_cast<const char*>(buffer.data() + gap_end), buffer.size() - gap_end);
+            int fd = open(filename.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            if (fd < 0) return;
+            if (gap_start > 0) (void)write(fd, buffer.data(), gap_start);
+            if (gap_end < buffer.size()) (void)write(fd, buffer.data() + gap_end, buffer.size() - gap_end);
+            close(fd);
             dirty = false;
         }
 
@@ -53,6 +57,7 @@ namespace honeymoon::mem {
         }
 
         void insert_string(const std::string& s) { for (char c : s) insert_char(c); }
+        void insert_string(const char* s, size_t n) { for (size_t i = 0; i < n; ++i) insert_char(s[i]); }
 
         void delete_char() {
             if (gap_start > 0) { gap_start--; dirty = true; }

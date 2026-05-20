@@ -8,14 +8,10 @@
 #include "treesitter.hpp"
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <concepts>
-#include <expected>
-#include <format>
-#include <functional>
-#include <map>
-#include <memory>
-#include <ranges>
-#include <sstream>
 #include <string>
 #include <variant>
 #include <vector>
@@ -58,14 +54,17 @@ template <typename BufferPolicy, typename TerminalPolicy>
 class Editor : private honeymoon::config::Config,
                private honeymoon::mem::UndoHistory<> {
 public:
-  Editor() : output_buffer("") {
+  Editor() {
     update_window_size();
     bind_default_keys();
     load();
-    std::stringstream ss{std::string(honeymoon::STARTUP_LOGO)};
-    std::string line;
-    while (std::getline(ss, line)) {
-      logo_lines.push_back(line);
+    std::string logo_str(honeymoon::STARTUP_LOGO);
+    size_t lpos = 0;
+    while (lpos < logo_str.size()) {
+      size_t lend = logo_str.find('\n', lpos);
+      if (lend == std::string::npos) lend = logo_str.size();
+      logo_lines.push_back(logo_str.substr(lpos, lend - lpos));
+      lpos = lend + 1;
     }
     if (!logo_lines.empty() && logo_lines[0].empty())
       logo_lines.erase(logo_lines.begin());
@@ -102,8 +101,18 @@ private:
   std::string current_filename = "[No Name]";
   std::string status_message =
       "Honeymoon | C-x C-c: Quit | C-x C-s: Save | C-SP: Mark";
-  std::string output_buffer;
-  std::string clipboard;
+  struct RenderBuf {
+    char data[4096];
+    size_t len = 0;
+    void clear() { len = 0; }
+    RenderBuf& append(const char* s) { while (*s && len < sizeof(data)) data[len++] = *s++; return *this; }
+    RenderBuf& append(char c) { if (len < sizeof(data)) data[len++] = c; return *this; }
+    RenderBuf& append(int n, char c) { if (n <= 0) return *this; size_t avail = sizeof(data) - len; size_t m = (size_t)n < avail ? (size_t)n : avail; for (size_t i = 0; i < m; i++) data[len++] = c; return *this; }
+    RenderBuf& append(const char* s, size_t n) { size_t m = n < sizeof(data) - len ? n : sizeof(data) - len; memcpy(data + len, s, m); len += m; return *this; }
+    RenderBuf& append(const std::string& s) { append(s.data(), s.size()); return *this; }
+  } output_buffer;
+  char* clipboard = nullptr;
+  size_t clipboard_len = 0;
   size_t scroll_row = 0, scroll_col = 0;
   int window_rows = 0, window_cols = 0;
   size_t selection_anchor = std::string::npos;
@@ -112,180 +121,187 @@ private:
   std::vector<std::string> recent_files;
   honeymoon::syntax::TreeSitterHighlighter syntax_engine;
 
-  std::map<std::string, std::function<void()>> actions;
+  enum ActionId : uint8_t {
+    ACT_NONE = 0,
+    ACT_QUIT, ACT_SAVE_FILE, ACT_MARK_SET, ACT_CANCEL, ACT_CUT, ACT_YANK,
+    ACT_MOVE_LINE_START, ACT_MOVE_LINE_END, ACT_KILL_LINE, ACT_RECENTER,
+    ACT_TRANSPOSE_CHARS, ACT_NEWLINE, ACT_SEARCH_FORWARD, ACT_SEARCH_BACKWARD,
+    ACT_INDENT, ACT_DEDENT, ACT_DELETE_BACKWARD, ACT_DELETE_FORWARD,
+    ACT_MOVE_UP, ACT_MOVE_DOWN, ACT_MOVE_LEFT, ACT_MOVE_RIGHT,
+    ACT_UNDO, ACT_REDO, ACT_COPY, ACT_MOVE_WORD_BACKWARD, ACT_MOVE_WORD_FORWARD,
+    ACT_KILL_WORD, ACT_TRANSPOSE_WORDS, ACT_GOTO_LINE, ACT_FIND_FILE,
+    ACT_LIST_BUFFERS, ACT_KILL_BUFFER, ACT_SELECT_ALL, ACT_HELP_KEY, ACT_HELP_FUNC,
+  };
+
+  struct ActionEntry { const char* name; ActionId id; };
+  static constexpr ActionEntry action_table[] = {
+    {"quit", ACT_QUIT}, {"save_file", ACT_SAVE_FILE},
+    {"mark_set", ACT_MARK_SET}, {"cancel", ACT_CANCEL},
+    {"cut", ACT_CUT}, {"yank", ACT_YANK},
+    {"move_line_start", ACT_MOVE_LINE_START}, {"move_line_end", ACT_MOVE_LINE_END},
+    {"kill_line", ACT_KILL_LINE}, {"recenter", ACT_RECENTER},
+    {"transpose_chars", ACT_TRANSPOSE_CHARS}, {"newline", ACT_NEWLINE},
+    {"search_forward", ACT_SEARCH_FORWARD}, {"search_backward", ACT_SEARCH_BACKWARD},
+    {"indent", ACT_INDENT}, {"dedent", ACT_DEDENT},
+    {"delete_backward", ACT_DELETE_BACKWARD}, {"delete_forward", ACT_DELETE_FORWARD},
+    {"move_up", ACT_MOVE_UP}, {"move_down", ACT_MOVE_DOWN},
+    {"move_left", ACT_MOVE_LEFT}, {"move_right", ACT_MOVE_RIGHT},
+    {"undo", ACT_UNDO}, {"redo", ACT_REDO},
+    {"copy", ACT_COPY}, {"move_word_backward", ACT_MOVE_WORD_BACKWARD},
+    {"move_word_forward", ACT_MOVE_WORD_FORWARD}, {"kill_word", ACT_KILL_WORD},
+    {"transpose_words", ACT_TRANSPOSE_WORDS}, {"goto_line", ACT_GOTO_LINE},
+    {"find_file", ACT_FIND_FILE}, {"list_buffers", ACT_LIST_BUFFERS},
+    {"kill_buffer", ACT_KILL_BUFFER}, {"select_all", ACT_SELECT_ALL},
+    {"help_key", ACT_HELP_KEY}, {"help_func", ACT_HELP_FUNC},
+  };
+
+  static ActionId lookup_action(const std::string& name) {
+    for (auto& e : action_table) {
+      if (name == e.name) return e.id;
+    }
+    return ACT_NONE;
+  }
+
+  void set_clipboard(const std::string& s) {
+    free(clipboard);
+    clipboard_len = s.size();
+    clipboard = (char*)malloc(clipboard_len + 1);
+    if (clipboard) { memcpy(clipboard, s.data(), clipboard_len); clipboard[clipboard_len] = '\0'; }
+  }
+
+  void set_clipboard(const char* s, size_t n) {
+    free(clipboard);
+    clipboard_len = n;
+    clipboard = (char*)malloc(n + 1);
+    if (clipboard) { memcpy(clipboard, s, n); clipboard[n] = '\0'; }
+  }
+
+  void execute_action(ActionId id) {
+    switch (id) {
+      case ACT_QUIT: should_quit = true; break;
+      case ACT_SAVE_FILE: buffer.save_to_file(current_filename); status_message = "Saved"; break;
+      case ACT_MARK_SET: selection_anchor = buffer.get_cursor(); status_message = "Mark Set"; break;
+      case ACT_CANCEL: {
+        if (std::holds_alternative<GotoLineState>(mode)) {
+          mode = EditorState{current_filename}; status_message = "Cancelled";
+        } else {
+          selection_anchor = std::string::npos; current_node = root_node; pending_key_count = 0; status_message = "Quit";
+        } break;
+      }
+      case ACT_CUT: {
+        if (selection_anchor != std::string::npos) {
+          snapshot_for_undo(buffer.get_content(), buffer.get_cursor());
+          size_t c = buffer.get_cursor(); set_clipboard(buffer.get_range(selection_anchor, c));
+          buffer.delete_range(selection_anchor, c); selection_anchor = std::string::npos; status_message = "Cut";
+        } else status_message = "No selection";
+        break;
+      }
+      case ACT_YANK: {
+        if (clipboard && clipboard_len) { snapshot_for_undo(buffer.get_content(), buffer.get_cursor()); buffer.insert_string(clipboard, clipboard_len); status_message = "Yank"; }
+        else { status_message = "Empty"; }
+        break;
+      }
+      case ACT_MOVE_LINE_START: move_line_start(); break;
+      case ACT_MOVE_LINE_END: move_line_end(); break;
+      case ACT_KILL_LINE: kill_to_eol(); break;
+      case ACT_RECENTER: recenter_view(); break;
+      case ACT_TRANSPOSE_CHARS: transpose_chars(); break;
+      case ACT_NEWLINE: snapshot_for_undo(buffer.get_content(), buffer.get_cursor()); buffer.insert_char('\n'); break;
+      case ACT_SEARCH_FORWARD: mode = TextSearchState{.query = "", .start_idx = buffer.get_cursor(), .forward = true}; status_message = "I-Search: "; break;
+      case ACT_SEARCH_BACKWARD: mode = TextSearchState{.query = "", .start_idx = buffer.get_cursor(), .forward = false}; status_message = "I-Search Back: "; break;
+      case ACT_INDENT: perform_indent(true); break;
+      case ACT_DEDENT: perform_indent(false); break;
+      case ACT_DELETE_BACKWARD: snapshot_for_undo(buffer.get_content(), buffer.get_cursor()); buffer.delete_char(); break;
+      case ACT_DELETE_FORWARD: snapshot_for_undo(buffer.get_content(), buffer.get_cursor()); buffer.delete_forward(); break;
+      case ACT_MOVE_UP: move_cursor_2d(-1, 0); break;
+      case ACT_MOVE_DOWN: move_cursor_2d(1, 0); break;
+      case ACT_MOVE_LEFT: move_cursor_lin(-1); break;
+      case ACT_MOVE_RIGHT: move_cursor_lin(1); break;
+      case ACT_UNDO: {
+        std::string cur = buffer.get_content(); size_t cur_cursor = buffer.get_cursor();
+        auto result = apply_undo(cur, cur_cursor);
+        if (result) { buffer.delete_range(0, buffer.size()); buffer.move_gap(0); buffer.insert_string(result->content); buffer.move_gap(result->cursor); status_message = "Undo"; }
+        else { status_message = "Nothing to undo"; }
+        break;
+      }
+      case ACT_REDO: {
+        std::string cur = buffer.get_content(); size_t cur_cursor = buffer.get_cursor();
+        auto result = apply_redo(cur, cur_cursor);
+        if (result) { buffer.delete_range(0, buffer.size()); buffer.move_gap(0); buffer.insert_string(result->content); buffer.move_gap(result->cursor); status_message = "Redo"; }
+        else { status_message = "Nothing to redo"; }
+        break;
+      }
+      case ACT_COPY: {
+        if (selection_anchor != std::string::npos) { set_clipboard(buffer.get_range(selection_anchor, buffer.get_cursor())); selection_anchor = std::string::npos; status_message = "Copy"; }
+        else { status_message = "No selection"; }
+        break;
+      }
+      case ACT_MOVE_WORD_BACKWARD: move_word_backward(); break;
+      case ACT_MOVE_WORD_FORWARD: move_word_forward(); break;
+      case ACT_KILL_WORD: kill_word(); break;
+      case ACT_TRANSPOSE_WORDS: transpose_words(); break;
+      case ACT_GOTO_LINE: mode = GotoLineState{.query = ""}; status_message = "Go to line: "; break;
+      case ACT_FIND_FILE: mode = FileSearchState{.query = ""}; status_message = "Find File: "; break;
+      case ACT_LIST_BUFFERS: mode = RecentFilesState{.selection = 0}; break;
+      case ACT_KILL_BUFFER: current_filename = "[No Name]"; buffer = BufferPolicy(); mode = HomeState{}; status_message = "Buffer Closed"; break;
+      case ACT_SELECT_ALL: selection_anchor = 0; buffer.move_gap(buffer.size()); status_message = "Select All"; break;
+      case ACT_HELP_KEY: mode = HelpState{}; status_message = "Help: Describe Key"; break;
+      case ACT_HELP_FUNC: mode = HelpState{}; status_message = "Help: Describe Function"; break;
+      default: break;
+    }
+  }
 
   struct KeyNode {
-    std::map<Key, std::shared_ptr<KeyNode>> children;
+    Key key;
+    KeyNode* next_sibling = nullptr;
+    KeyNode* first_child = nullptr;
     std::string action;
   };
 
-  std::shared_ptr<KeyNode> root_node;
-  std::shared_ptr<KeyNode> current_node;
-  std::vector<Key> pending_keys;
+  KeyNode* root_node = nullptr;
+  KeyNode* current_node = nullptr;
+  Key pending_keys[16];
+  int pending_key_count = 0;
+
+public:
+  ~Editor() { delete_key_tree(root_node); free(clipboard); }
+private:
+
+  void delete_key_tree(KeyNode* n) {
+    if (!n) return;
+    delete_key_tree(n->first_child);
+    delete_key_tree(n->next_sibling);
+    delete n;
+  }
+
+  KeyNode* find_child(KeyNode* parent, Key k) {
+    for (KeyNode* c = parent->first_child; c; c = c->next_sibling) {
+      if (c->key == k) return c;
+    }
+    return nullptr;
+  }
+
+  KeyNode* add_child(KeyNode* parent, Key k) {
+    KeyNode* c = new KeyNode;
+    c->key = k;
+    c->next_sibling = parent->first_child;
+    parent->first_child = c;
+    return c;
+  }
 
   void bind_default_keys() {
-    actions["quit"] = [this]() { should_quit = true; };
-    actions["save_file"] = [this]() {
-      buffer.save_to_file(current_filename);
-      status_message = "Saved";
-    };
-    actions["mark_set"] = [this]() {
-      selection_anchor = buffer.get_cursor();
-      status_message = "Mark Set";
-    };
-    actions["cancel"] = [this]() {
-      if (std::holds_alternative<GotoLineState>(mode)) {
-        mode = EditorState{current_filename};
-        status_message = "Cancelled";
-      } else {
-        selection_anchor = std::string::npos;
-        current_node = root_node;
-        pending_keys.clear();
-        status_message = "Quit";
-      }
-    };
-    actions["cut"] = [this]() {
-      if (selection_anchor != std::string::npos) {
-        snapshot_for_undo(buffer.get_content(), buffer.get_cursor());
-        size_t c = buffer.get_cursor();
-        clipboard = buffer.get_range(selection_anchor, c);
-        buffer.delete_range(selection_anchor, c);
-        selection_anchor = std::string::npos;
-        status_message = "Cut";
-      } else
-        status_message = "No selection";
-    };
-    actions["yank"] = [this]() {
-      if (!clipboard.empty()) {
-        snapshot_for_undo(buffer.get_content(), buffer.get_cursor());
-        buffer.insert_string(clipboard);
-        status_message = "Yank";
-      } else
-        status_message = "Empty";
-    };
-    actions["move_line_start"] = [this]() { move_line_start(); };
-    actions["move_line_end"] = [this]() { move_line_end(); };
-    actions["kill_line"] = [this]() { kill_to_eol(); };
-    actions["recenter"] = [this]() { recenter_view(); };
-    actions["transpose_chars"] = [this]() { transpose_chars(); };
-    actions["newline"] = [this]() {
-      snapshot_for_undo(buffer.get_content(), buffer.get_cursor());
-      buffer.insert_char('\n');
-    };
-    actions["search_forward"] = [this]() {
-      mode = TextSearchState{
-          .query = "", .start_idx = buffer.get_cursor(), .forward = true};
-      status_message = "I-Search: ";
-    };
-    actions["search_backward"] = [this]() {
-      mode = TextSearchState{
-          .query = "", .start_idx = buffer.get_cursor(), .forward = false};
-      status_message = "I-Search Back: ";
-    };
-    actions["indent"] = [this]() { perform_indent(true); };
-    actions["dedent"] = [this]() { perform_indent(false); };
-    actions["delete_backward"] = [this]() {
-      snapshot_for_undo(buffer.get_content(), buffer.get_cursor());
-      buffer.delete_char();
-    };
-    actions["delete_forward"] = [this]() {
-      snapshot_for_undo(buffer.get_content(), buffer.get_cursor());
-      buffer.delete_forward();
-    };
-    actions["move_up"] = [this]() { move_cursor_2d(-1, 0); };
-    actions["move_down"] = [this]() { move_cursor_2d(1, 0); };
-    actions["move_left"] = [this]() { move_cursor_lin(-1); };
-    actions["move_right"] = [this]() { move_cursor_lin(1); };
-    actions["undo"] = [this]() {
-      std::string cur = buffer.get_content();
-      size_t cur_cursor = buffer.get_cursor();
-      auto result = apply_undo(cur, cur_cursor);
-      if (result) {
-        buffer.delete_range(0, buffer.size());
-        buffer.move_gap(0);
-        buffer.insert_string(result->content);
-        buffer.move_gap(result->cursor);
-        status_message = "Undo";
-      } else {
-        status_message = "Nothing to undo";
-      }
-    };
-    actions["redo"] = [this]() {
-      std::string cur = buffer.get_content();
-      size_t cur_cursor = buffer.get_cursor();
-      auto result = apply_redo(cur, cur_cursor);
-      if (result) {
-        buffer.delete_range(0, buffer.size());
-        buffer.move_gap(0);
-        buffer.insert_string(result->content);
-        buffer.move_gap(result->cursor);
-        status_message = "Redo";
-      } else {
-        status_message = "Nothing to redo";
-      }
-    };
-
-    actions["copy"] = [this]() {
-      if (selection_anchor != std::string::npos) {
-        clipboard = buffer.get_range(selection_anchor, buffer.get_cursor());
-        selection_anchor = std::string::npos;
-        status_message = "Copy";
-      } else
-        status_message = "No selection";
-    };
-    actions["move_word_backward"] = [this]() { move_word_backward(); };
-    actions["move_word_forward"] = [this]() { move_word_forward(); };
-    actions["kill_word"] = [this]() { kill_word(); };
-    actions["transpose_words"] = [this]() { transpose_words(); };
-    actions["goto_line"] = [this]() {
-      mode = GotoLineState{.query = ""};
-      status_message = "Go to line: ";
-    };
-
-    actions["find_file"] = [this]() {
-      mode = FileSearchState{.query = ""};
-      status_message = "Find File: ";
-    };
-    actions["list_buffers"] = [this]() {
-      mode = RecentFilesState{.selection = 0};
-    };
-    actions["kill_buffer"] = [this]() {
-      current_filename = "[No Name]";
-      buffer = BufferPolicy();
-      mode = HomeState{};
-      status_message = "Buffer Closed";
-    };
-    actions["select_all"] = [this]() {
-      selection_anchor = 0;
-      buffer.move_gap(buffer.size());
-      status_message = "Select All";
-    };
-    actions["help_key"] = [this]() {
-      mode = HelpState{};
-      status_message = "Help: Describe Key";
-    };
-    actions["help_func"] = [this]() {
-      mode = HelpState{};
-      status_message = "Help: Describe Function";
-    };
-
-    root_node = std::make_shared<KeyNode>();
+    root_node = new KeyNode;
     current_node = root_node;
-
-
-
     load_custom_binds();
   }
 
   void add_binding(const std::vector<Key> &keys, const std::string &action) {
-    if (keys.empty())
-      return;
-    std::shared_ptr<KeyNode> node = root_node;
+    if (keys.empty()) return;
+    KeyNode* node = root_node;
     for (const auto &k : keys) {
-      if (node->children.find(k) == node->children.end()) {
-        node->children[k] = std::make_shared<KeyNode>();
-      }
-      node = node->children[k];
+      KeyNode* child = find_child(node, k);
+      if (!child) child = add_child(node, k);
+      node = child;
     }
     node->action = action;
   }
@@ -298,10 +314,12 @@ private:
   }
 
 
-  const std::vector<std::string> home_menu = {
+  static constexpr const char* home_menu[] = {
       "File Searcher", "Recent Files", "Settings", "Help", "About", "Quit"};
-  const std::vector<std::string> settings_menu = {
+  static constexpr int home_menu_n = 6;
+  static constexpr const char* settings_menu[] = {
       "Line Numbers", "Syntax Highlighting", "Tab Width", "Back"};
+  static constexpr int settings_menu_n = 4;
 
   void update_window_size() {
     auto [rows, cols] = terminal.get_window_size();
@@ -333,7 +351,7 @@ private:
 
     std::visit(render_visitor, mode);
     output_buffer.append("\x1b[?25h");
-    terminal.write_raw(output_buffer);
+    terminal.write_raw(output_buffer.data, output_buffer.len);
   }
 
   int get_display_width(const std::string &s) {
@@ -361,7 +379,7 @@ private:
       int y = start_y + i;
       if (y >= window_rows)
         break;
-      output_buffer.append(std::format("\x1b[{};{}H", y + 1, 1));
+      output_buffer.append("\x1b[" + std::to_string(y + 1) + ";1H");
       output_buffer.append(std::string(pad, ' ')).append(logo_lines[i]);
     }
   }
@@ -381,7 +399,7 @@ private:
   }
 
   void draw_state_ui(HomeState &state, int y, int) {
-    for (int i = 0; i < (int)home_menu.size(); ++i) {
+    for (int i = 0; i < home_menu_n; ++i) {
       if (i == state.selection)
         output_buffer.append("\x1b[7m");
       draw_centered_text(y + i, home_menu[i]);
@@ -406,7 +424,7 @@ private:
 
   void draw_state_ui(SettingsState &state, int y, int logo_y) {
     draw_centered_text(logo_y, "SETTINGS");
-    for (int i = 0; i < (int)settings_menu.size(); ++i) {
+    for (int i = 0; i < settings_menu_n; ++i) {
       std::string label = settings_menu[i];
       std::string val;
       if (label == "Line Numbers")
@@ -451,7 +469,8 @@ private:
     int pad = (window_cols - width) / 2;
     if (pad < 0)
       pad = 0;
-    output_buffer.append(std::format("\x1b[{};{}H", y + 1, pad + 1))
+    output_buffer.append("\x1b[" + std::to_string(y + 1) + ";" +
+                             std::to_string(pad + 1) + "H")
         .append(text);
   }
 
@@ -476,27 +495,20 @@ private:
     return {cursor, r, c};
   }
 
-  const char *color_for_tree_sitter(honeymoon::syntax::HighlightKind kind) {
+  static constexpr const char* color_for_tree_sitter(honeymoon::syntax::HighlightKind kind) {
     using honeymoon::syntax::HighlightKind;
-    switch (kind) {
-    case HighlightKind::Comment:
-      return "\x1b[90m";
-    case HighlightKind::String:
-      return "\x1b[32m";
-    case HighlightKind::Number:
-      return "\x1b[36m";
-    case HighlightKind::Keyword:
-      return "\x1b[35m";
-    case HighlightKind::Type:
-      return "\x1b[34m";
-    case HighlightKind::Function:
-      return "\x1b[33m";
-    case HighlightKind::Preprocessor:
-      return "\x1b[95m";
-    case HighlightKind::None:
-      return nullptr;
-    }
-    return nullptr;
+    constexpr const char* table[] = {
+      nullptr,         // None
+      "\x1b[90m",     // Comment
+      "\x1b[32m",     // String
+      "\x1b[36m",     // Number
+      "\x1b[35m",     // Keyword
+      "\x1b[34m",     // Type
+      "\x1b[33m",     // Function
+      "\x1b[95m",     // Preprocessor
+    };
+    auto idx = static_cast<int>(kind);
+    return (idx >= 0 && idx < 8) ? table[idx] : nullptr;
   }
 
   void draw_rows() {
@@ -507,7 +519,6 @@ private:
       syntax_engine.update(content);
       using_tree_sitter = syntax_engine.active();
     }
-    auto lines_view = content | std::views::split('\n');
     auto cur = get_visual_cursor();
 
 
@@ -533,17 +544,28 @@ private:
     }
 
     int y = 0;
-    for (auto line : lines_view | std::views::drop(scroll_row) |
-                         std::views::take(window_rows)) {
+    size_t line_pos = 0;
+    for (size_t i = 0; i < scroll_row && line_pos < content.size(); ++i) {
+      size_t nl = content.find('\n', line_pos);
+      if (nl == std::string::npos) { line_pos = content.size(); break; }
+      line_pos = nl + 1;
+    }
+    for (; y < window_rows && line_pos <= content.size(); ++y) {
+      size_t nl = content.find('\n', line_pos);
+      size_t line_end = (nl == std::string::npos) ? content.size() : nl;
       size_t file_row = y + scroll_row;
+      std::string_view line_view(content.data() + line_pos, line_end - line_pos);
+      line_pos = (nl == std::string::npos) ? content.size() + 1 : nl + 1;
 
       if (show_line_numbers)
-        output_buffer.append(
-            std::format("\x1b[36m{:4} \x1b[39m", file_row + 1));
+        {
+          auto n = std::to_string(file_row + 1);
+          output_buffer.append("\x1b[36m" + std::string(4 - n.size(), ' ') +
+                               n + " \x1b[39m");
+        }
       else
         output_buffer.append(" ");
 
-      std::string_view line_view(line.data(), line.size());
       size_t line_start_abs = (file_row < line_offsets.size())
                                   ? line_offsets[file_row]
                                   : 0;
@@ -590,7 +612,6 @@ private:
       }
 
       output_buffer.append("\x1b[K\r\n");
-      y++;
     }
 
 
@@ -617,10 +638,10 @@ private:
   }
 
   void draw_status_bar() {
-    std::string stat = std::format("File: {}{} ", current_filename,
-                                    buffer.is_dirty() ? " [+]" : "");
-    std::string rstat =
-        std::format("{}/{}", get_visual_cursor().r + 1, buffer.size());
+    std::string stat = "File: " + current_filename +
+                       (buffer.is_dirty() ? " [+]" : "") + " ";
+    std::string rstat = std::to_string(get_visual_cursor().r + 1) + "/" +
+                        std::to_string(buffer.size());
     size_t len = stat.length(), rlen = rstat.length();
     if (len > (size_t)window_cols)
       len = window_cols;
@@ -648,7 +669,8 @@ private:
     if (r >= window_rows)
       r = window_rows - 1;
     int gutter = show_line_numbers ? 5 : 1;
-    output_buffer.append(std::format("\x1b[{};{}H", r + 1, c + 1 + gutter));
+    output_buffer.append("\x1b[" + std::to_string(r + 1) + ";" +
+                         std::to_string(c + 1 + gutter) + "H");
   }
 
   void process_keypress() {
@@ -668,25 +690,26 @@ private:
       }
     }
 
-    auto it = current_node->children.find(k);
-    if (it != current_node->children.end()) {
-      current_node = it->second;
-      pending_keys.push_back(k);
+    KeyNode* next = find_child(current_node, k);
+    if (next) {
+      current_node = next;
+      if (pending_key_count < 16) pending_keys[pending_key_count++] = k;
 
-      if (!current_node->action.empty() && current_node->children.empty()) {
-        std::string act = current_node->action;
+      if (!current_node->action.empty() && !current_node->first_child) {
+        ActionId aid = lookup_action(current_node->action);
         current_node = root_node;
-        pending_keys.clear();
+        pending_key_count = 0;
         status_message = "";
         close_typing_group();
-        if (actions.count(act))
-          actions[act]();
+        if (aid != ACT_NONE)
+          execute_action(aid);
         else
-          status_message = "Action not found: " + act;
+          status_message = std::string("Action not found: ") + current_node->action;
       } else {
-        std::string msg = "";
-        for (auto pk : pending_keys) {
-          msg += to_string(pk) + " ";
+        std::string msg;
+        for (int i = 0; i < pending_key_count; ++i) {
+          if (i) msg += ' ';
+          msg += to_string(pending_keys[i]);
         }
         status_message = msg;
       }
@@ -694,7 +717,7 @@ private:
       if (current_node != root_node) {
         status_message = "Undefined Key";
         current_node = root_node;
-        pending_keys.clear();
+        pending_key_count = 0;
       } else {
         if (is_printable((int)k) && k != Key::Esc) {
           snapshot_for_undo(buffer.get_content(), buffer.get_cursor());
@@ -763,25 +786,20 @@ private:
     if (k == Key::ArrowUp || k == Key::Ctrl_P) {
       state.selection--;
       if (state.selection < 0)
-        state.selection = home_menu.size() - 1;
+        state.selection = home_menu_n - 1;
     } else if (k == Key::ArrowDown || k == Key::Ctrl_N) {
       state.selection++;
-      if (state.selection >= (int)home_menu.size())
+      if (state.selection >= home_menu_n)
         state.selection = 0;
     } else if (k == Key::Enter) {
-      std::string sel = home_menu[state.selection];
-      if (sel == "Quit")
-        should_quit = true;
-      else if (sel == "About")
-        mode = AboutState{};
-      else if (sel == "Help")
-        mode = HelpState{};
-      else if (sel == "Settings")
-        mode = SettingsState{};
-      else if (sel == "Recent Files")
-        mode = RecentFilesState{};
-      else if (sel == "File Searcher")
-        mode = FileSearchState{};
+      switch (state.selection) {
+        case 0: mode = FileSearchState{}; break;
+        case 1: mode = RecentFilesState{}; break;
+        case 2: mode = SettingsState{}; break;
+        case 3: mode = HelpState{}; break;
+        case 4: mode = AboutState{}; break;
+        case 5: should_quit = true; break;
+      }
     }
   }
 
@@ -828,8 +846,11 @@ private:
     }
     if (k == Key::Enter) {
       if (!state.query.empty()) {
-        try {
-          int line_num = std::stoi(state.query);
+        char* end = nullptr;
+        long line_num = strtol(state.query.c_str(), &end, 10);
+        if (end == state.query.c_str() || *end != '\0') {
+          status_message = "Invalid number";
+        } else {
           std::string c = buffer.get_content();
           size_t idx = 0;
           int current_line = 1;
@@ -840,8 +861,6 @@ private:
           }
           buffer.move_gap(idx);
           status_message = "Jumped to line " + state.query;
-        } catch (...) {
-          status_message = "Invalid number";
         }
       }
       mode = EditorState{current_filename};
@@ -860,10 +879,10 @@ private:
     if (k == Key::ArrowUp || k == Key::Ctrl_P) {
       state.selection--;
       if (state.selection < 0)
-        state.selection = settings_menu.size() - 1;
+        state.selection = settings_menu_n - 1;
     } else if (k == Key::ArrowDown || k == Key::Ctrl_N) {
       state.selection++;
-      if (state.selection >= (int)settings_menu.size())
+      if (state.selection >= settings_menu_n)
         state.selection = 0;
     } else if (k == Key::Enter) {
       std::string sel = settings_menu[state.selection];
@@ -988,7 +1007,7 @@ private:
     if (start == end && end < c.size())
       end++;
     if (end > start) {
-      clipboard = buffer.get_range(start, end);
+      set_clipboard(buffer.get_range(start, end));
       buffer.delete_range(start, end);
       status_message = "Killed line";
     }
@@ -1000,7 +1019,7 @@ private:
     move_word_forward();
     size_t end = buffer.get_cursor();
     if (end > start) {
-      clipboard = buffer.get_range(start, end);
+      set_clipboard(buffer.get_range(start, end));
       buffer.delete_range(start, end);
       status_message = "Killed word";
     }

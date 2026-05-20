@@ -6,7 +6,7 @@
 #include <termios.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
-#include <iostream>
+#include <cstdio>
 #include <string>
 #include <utility>
 #include "input.hpp"
@@ -15,7 +15,7 @@
 namespace honeymoon::driver {
     class Terminal {
     public:
-        Terminal() { if (!enable_raw_mode()) std::cerr << "Kernel Panic: No Raw Mode" << std::endl; }
+        Terminal() { if (!enable_raw_mode()) fprintf(stderr, "Kernel Panic: No Raw Mode\n"); }
         ~Terminal() { disable_raw_mode(); }
         Terminal(const Terminal&) = delete;
         Terminal& operator=(const Terminal&) = delete;
@@ -61,7 +61,9 @@ namespace honeymoon::driver {
             return static_cast<Key>(c);
         }
 
-        void write_raw(std::string_view s) { write(STDOUT_FILENO, s.data(), s.size()); }
+        void write_raw(const char* s, size_t n) { (void)write(STDOUT_FILENO, s, n); }
+        void write_raw(std::string_view s) { write_raw(s.data(), s.size()); }
+        void write_raw(const char* s) { write_raw(s, strlen(s)); }
 
     private:
         struct termios orig_termios;
