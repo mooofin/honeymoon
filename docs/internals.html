@@ -5,9 +5,18 @@
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>Honeymoon Architecture</title>
         <meta property="og:title" content="Honeymoon Editor - Internals" />
-        <meta property="og:description" content="A minimal, Emacs-inspired terminal text editor written in C++23. Fast as fuck." />
-        <meta property="og:image" content="https://mooofin.github.io/honeymoon/images/preview.jpg" />
-        <meta property="og:url" content="https://mooofin.github.io/honeymoon/internals.html" />
+        <meta
+            property="og:description"
+            content="A minimal, Emacs-inspired terminal text editor written in C++23. Fast as fuck."
+        />
+        <meta
+            property="og:image"
+            content="https://mooofin.github.io/honeymoon/images/preview.jpg"
+        />
+        <meta
+            property="og:url"
+            content="https://mooofin.github.io/honeymoon/internals.html"
+        />
         <meta name="twitter:card" content="summary_large_image" />
         <link rel="stylesheet" href="style.css" />
         <link rel="icon" type="image/jpeg" href="images/favicon.jpg" />
@@ -40,8 +49,10 @@
             "
         >
             <p>
-                <strong>Version:</strong> 0.1 (Alpha)<br />
-                <strong>Standard:</strong> C++23
+                <strong>Version:</strong> 0.6 (Massacre)<br />
+                <strong>Standard:</strong> C++23<br />
+                <strong>Size:</strong> 81K uncompressed / 37K packed<br />
+                <strong>Heap allocs in render loop:</strong> 0
             </p>
 
             <div style="text-align: center; margin: 20px 0">
@@ -55,7 +66,10 @@
             <p>
                 Honeymoon is a terminal editor written in C++23. It bypasses
                 libraries like ncurses to interact directly with the terminal
-                driver via <code>termios</code> and ANSI escape codes.
+                driver via <code>termios</code> and ANSI escape codes. The
+                render loop does zero heap allocations. File I/O uses raw POSIX
+                syscalls. Key dispatch is an enum + jump table. Everything
+                unnecessary has been removed.
             </p>
 
             <hr />
@@ -82,6 +96,13 @@ void run() {
                 We disable Canonical Mode (line buffering) and Echo to take full
                 control of the terminal. This allows us to process every
                 keystroke immediately.
+            </p>
+            <p>
+                No <code>&lt;iostream&gt;</code> is used anywhere in the editor.
+                Terminal I/O uses raw <code>read()</code> / <code>write()</code>
+                syscalls directly. Error messages go to <code>stderr</code>
+                via <code>fprintf</code>. This avoids pulling in the entire
+                iostream locale machinery at startup.
             </p>
             <pre><code class="language-cpp">// src/terminal.hpp
 bool enable_raw_mode() {
@@ -114,7 +135,7 @@ bool enable_raw_mode() {
                 position.
             </p>
             <pre
-                style="background: #eee; border: 1px solid #999; padding: 10px"
+                style="background: #eee; border: 1px solid #999; padding: 10px; font-family: 'Courier New', Courier, monospace;"
             >
 [ 'H', 'E',  _, _, _,  'L', 'L', 'O' ]
           ^ Cursor (Gap Start)   </pre
@@ -137,15 +158,55 @@ void move_gap(size_type position) {
     // ...
 }</code></pre>
 
+            <h3>File I/O (Raw POSIX Syscalls)</h3>
+            <p>
+                Loading and saving files uses raw POSIX syscalls instead of
+                <code>&lt;fstream&gt;</code>. No <code>basic_filebuf</code>
+                vtables, no buffering layer, no template bloat.
+            </p>
+            <pre><code class="language-cpp">// src/buffer.hpp
+void load_from_file(const std::string&amp; filename) {
+    int fd = open(filename.c_str(), O_RDONLY);
+    if (fd &lt; 0) return;
+    struct stat st;
+    fstat(fd, &amp;st);
+    buffer.resize(st.st_size + DEFAULT_GAP_SIZE);
+    read(fd, buffer.data(), st.st_size);
+    close(fd);
+    gap_start = st.st_size;
+    gap_end = buffer.size();
+}
+
+void save_to_file(const std::string&amp; filename) {
+    int fd = open(filename.c_str(),
+                  O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd &lt; 0) return;
+    if (gap_start > 0)
+        write(fd, buffer.data(), gap_start);
+    if (gap_end &lt; buffer.size())
+        write(fd, buffer.data() + gap_end,
+              buffer.size() - gap_end);
+    close(fd);
+    dirty = false;
+}</code></pre>
+
             <hr />
 
-            <h2>4. Double-Buffered Rendering</h2>
+            <h2>4. Stack-Buffered Rendering</h2>
             <p>
-                To prevent tearing and flicker, we construct the entire frame in
-                a <code>std::string</code> before making a single
-                <code>write</code> syscall.
+                The entire frame is built on the stack in a fixed
+                <code>char[4096]</code> buffer, then flushed in a single
+                <code>write()</code> syscall. Zero heap allocations per frame.
             </p>
             <pre><code class="language-cpp">// src/editor.hpp
+struct RenderBuf {
+    char data[4096];
+    size_t len = 0;
+    void clear() { len = 0; }
+    RenderBuf&amp; append(const char* s) { /* memcpy into data */ return *this; }
+    RenderBuf&amp; append(char c) { /* single byte */ return *this; }
+};
+
 void refresh_screen() {
     output_buffer.clear();
     output_buffer.append("\x1b[?25l\x1b[H"); // Hide cursor, go home
@@ -155,7 +216,7 @@ void refresh_screen() {
     place_cursor();    // Move real terminal cursor
 
     output_buffer.append("\x1b[?25h"); // Show cursor
-    terminal.write_raw(output_buffer); // Atomic update
+    terminal.write_raw(output_buffer.data, output_buffer.len); // Atomic flush
 }</code></pre>
 
             <hr />
@@ -204,24 +265,45 @@ Key read_key() {
             </p>
             <pre><code class="language-cpp">// src/editor.hpp
 struct KeyNode {
-    std::map&lt;Key, std::shared_ptr&lt;KeyNode&gt;&gt; children;
-    std::string action;
+    Key key;
+    KeyNode* next_sibling = nullptr;  // Linked list of children
+    KeyNode* first_child = nullptr;   // First child (head of list)
+    std::string action;               // Action name at leaf nodes
 };
 
-void handle_input(EditorState &, Key k) {
-    auto it = current_node->children.find(k);
-    if (it != current_node->children.end()) {
-        current_node = it->second;
-        pending_keys.push_back(k);
+// Linear scan over a short linked list beats a red-black tree
+KeyNode* find_child(KeyNode* parent, Key k) {
+    for (KeyNode* c = parent->first_child; c; c = c->next_sibling)
+        if (c->key == k) return c;
+    return nullptr;
+}
 
-        if (!current_node->action.empty() && current_node->children.empty()) {
-            // Leaf node - execute action
-            actions[current_node->action]();
+// Action dispatch via enum + jump table (no std::function, no std::map)
+enum ActionId : uint8_t {
+    ACT_QUIT, ACT_SAVE_FILE, ACT_CUT, ACT_YANK, /* ... */
+};
+static constexpr ActionEntry action_table[] = {
+    {"quit", ACT_QUIT}, {"save_file", ACT_SAVE_FILE}, /* ... */
+};
+
+void execute_action(ActionId id) {
+    switch (id) {
+        case ACT_QUIT: should_quit = true; break;
+        case ACT_SAVE_FILE: buffer.save_to_file(current_filename); break;
+        // ... jump table dispatch
+    }
+}
+
+void handle_input(EditorState &amp;, Key k) {
+    KeyNode* next = find_child(current_node, k);
+    if (next) {
+        current_node = next;
+        if (!current_node->action.empty() &amp;&amp; !current_node->first_child) {
+            ActionId aid = lookup_action(current_node->action);
             current_node = root_node;
-            pending_keys.clear();
+            execute_action(aid);
         }
     }
-    // ...
 }</code></pre>
 
             <h3>M- Prefix Expansion</h3>
@@ -251,7 +333,7 @@ for (size_t i = 0; i &lt; words.size() - 1; ++i) {
                 format:
             </p>
             <pre
-                style="background: #eee; border: 1px solid #999; padding: 10px"
+                style="background: #eee; border: 1px solid #999; padding: 10px; font-family: 'Courier New', Courier, monospace;"
             >
 # Comment lines start with #
 M-w copy                  # Meta-w copies selection
@@ -321,7 +403,10 @@ using EditorMode =
     std::visit(render_visitor, mode);
 }</code></pre>
 
-            <p>Each mode has its own <code>handle_input()</code> overload, keeping concerns isolated:</p>
+            <p>
+                Each mode has its own <code>handle_input()</code> overload,
+                keeping concerns isolated:
+            </p>
             <pre><code class="language-cpp">void handle_input(EditorState &amp;state, Key k) { /* trie dispatch */ }
 void handle_input(HomeState &amp;state, Key k)  { /* menu navigation */ }
 void handle_input(TextSearchState &amp;state, Key k) { /* incremental search */ }
@@ -333,9 +418,9 @@ void handle_input(GotoLineState &amp;state, Key k)  { /* line number input */ }<
             <p>
                 Syntax highlighting is provided by <strong>Tree-sitter</strong>,
                 loaded at runtime via <code>dlopen</code>. This avoids a
-                compile-time dependency - if the libraries aren't
-                installed, the editor falls back to a simple built-in
-                highlighter (digits in cyan, strings in green).
+                compile-time dependency - if the libraries aren't installed, the
+                editor falls back to a simple built-in highlighter (digits in
+                cyan, strings in green).
             </p>
 
             <h3>Dynamic Loading</h3>
@@ -343,7 +428,7 @@ void handle_input(GotoLineState &amp;state, Key k)  { /* line number input */ }<
                 The <code>TreeSitterHighlighter</code> class dlopen's three
                 shared libraries:
             </p>
-            <ul style="text-align: left;">
+            <ul style="text-align: left">
                 <li><code>libtree-sitter.so</code> - core parser API</li>
                 <li><code>libtree-sitter-c.so</code> - C grammar</li>
                 <li><code>libtree-sitter-cpp.so</code> - C++ grammar</li>
@@ -372,7 +457,8 @@ bool load_api() {
 
             <h3>Highlight Classification</h3>
             <p>
-                Tree-sitter node types are mapped to a <code>HighlightKind</code>
+                Tree-sitter node types are mapped to a
+                <code>HighlightKind</code>
                 enum using pattern matching (exact match, prefix, substring):
             </p>
             <pre><code class="language-cpp">enum class HighlightKind {
@@ -419,8 +505,53 @@ HighlightKind kind_at(size_t byte_index) const noexcept {
             <div class="warning" style="font-size: 12px; padding: 5px">
                 Tree-sitter is optional. If the shared libraries aren't found,
                 the editor silently falls back to a naive highlighter that
-                colors digits and string quotes. No crash, no fuss.
+                colors digits and string quotes.
             </div>
+
+            <hr />
+
+            <h2>9. Build Flags & Binary Size</h2>
+            <p>
+                Honeymoon is 81K uncompressed (37K with UPX LZMA). This is
+                achieved through aggressive compiler and linker flags that
+                strip everything unnecessary from the binary.
+            </p>
+
+            <pre><code class="language-bash"># .bazelrc (release config)
+-O3 -DNDEBUG -flto -fvisibility=hidden
+-fno-exceptions -fno-rtti
+-fno-plt                     # Eliminate .plt / .got.plt
+-fno-unwind-tables           # Remove .eh_frame
+-fmerge-all-constants        # Merge identical strings
+-fno-unroll-loops            # No loop bloat
+-ffunction-sections -fdata-sections
+-Wl,--gc-sections            # Garbage-collect unused sections
+-Wl,--icf=all                # Identical code folding
+-Wl,--hash-style=sysv        # Smaller symbol hash
+-Wl,--build-id=none          # Remove build ID note</code></pre>
+
+            <table style="width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 0.9em;">
+                <tr style="background: #FEEED5; font-weight: bold;">
+                    <td style="border: 2px solid #000; padding: 6px;">Section</td>
+                    <td style="border: 2px solid #000; padding: 6px;">Before</td>
+                    <td style="border: 2px solid #000; padding: 6px;">After</td>
+                </tr>
+                <tr><td style="border: 1px solid #999; padding: 4px;">.text</td><td style="border: 1px solid #999; padding: 4px;">135K</td><td style="border: 1px solid #999; padding: 4px;">67K</td></tr>
+                <tr><td style="border: 1px solid #999; padding: 4px;">.plt</td><td style="border: 1px solid #999; padding: 4px;">624</td><td style="border: 1px solid #999; padding: 4px;">20</td></tr>
+                <tr><td style="border: 1px solid #999; padding: 4px;">.got.plt</td><td style="border: 1px solid #999; padding: 4px;">328</td><td style="border: 1px solid #999; padding: 4px;">20</td></tr>
+                <tr><td style="border: 1px solid #999; padding: 4px;">.rela.plt</td><td style="border: 1px solid #999; padding: 4px;">912</td><td style="border: 1px solid #999; padding: 4px;">0</td></tr>
+                <tr><td style="border: 1px solid #999; padding: 4px;">.eh_frame + .eh_frame_hdr</td><td style="border: 1px solid #999; padding: 4px;">6.6K</td><td style="border: 1px solid #999; padding: 4px;">48</td></tr>
+                <tr><td style="border: 1px solid #999; padding: 4px;">.gcc_except_table</td><td style="border: 1px solid #999; padding: 4px;">3.4K</td><td style="border: 1px solid #999; padding: 4px;">0</td></tr>
+                <tr style="font-weight: bold; background: #eee;">
+                    <td style="border: 2px solid #000; padding: 6px;">Total</td>
+                    <td style="border: 2px solid #000; padding: 6px;">138K</td>
+                    <td style="border: 2px solid #000; padding: 6px;">81K</td>
+                </tr>
+            </table>
+
+            <p>
+                To pack with UPX (37K): <code>upx --lzma --best bazel-bin/honeymoon</code>
+            </p>
         </div>
 
         <div class="footer">

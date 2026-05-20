@@ -28,6 +28,31 @@
         <div style="max-width: 800px; margin: 0 auto; text-align: left; background: #fff; border: 1px dotted #ccc; padding: 20px; font-family: 'Times New Roman', serif;">
 
             <div style="margin-bottom: 40px;">
+                <h2 style="color: #8a2be2;">v0.6 - The Honeymoon Massacre</h2>
+                <p style="color: #888; font-size: 0.85em;">138K &rarr; 81K uncompressed / 37K packed</p>
+                <ul>
+                    <li><strong>Binary size cut by 40%</strong> (73% with UPX LZMA). 81K raw, 37K packed.</li>
+                    <li><strong>Zero heap allocations in the render loop.</strong> Replaced <code>std::string output_buffer</code> with a <code>char[4096]</code> stack buffer. The frame is built entirely on the stack, flushed in one <code>write()</code> syscall.</li>
+                    <li><strong>Killed <code>&lt;fstream&gt;</code> entirely.</strong> All file I/O (4 files: buffer, config, keybinds, history) replaced with raw POSIX <code>open</code>/<code>read</code>/<code>write</code>/<code>close</code>. No more <code>basic_filebuf</code> vtables.</li>
+                    <li><strong><code>std::map</code> + <code>std::function</code> &rarr; <code>enum</code> + <code>switch</code>.</strong> Action dispatch is now a flat array lookup and a jump table. No red-black tree, no type-erased function wrappers.</li>
+                    <li><strong><code>std::shared_ptr&lt;KeyNode&gt;</code> &rarr; raw linked list.</strong> The key trie uses raw pointers. No atomic reference counting on every keystroke.</li>
+                    <li><strong><code>&lt;ranges&gt;</code> &rarr; manual loops.</strong> <code>std::views::split</code> / <code>drop</code> / <code>take</code> replaced with index arithmetic. 6K of &lt;ranges&gt; template instantiations removed from .text.</li>
+                    <li><strong><code>std::string clipboard</code> &rarr; <code>char*</code> + <code>malloc</code>.</strong> No SSO, no std::string copy/move overhead.</li>
+                    <li><strong><code>std::vector&lt;Key&gt;</code> &rarr; <code>Key[16]</code> + counter.</strong> Max keychord depth is 4. Why was this a vector.</li>
+                    <li><strong>Vectors &rarr; <code>constexpr</code> C arrays.</strong> Menus, color tables, action names all baked into .rodata at compile time.</li>
+                    <li><strong><code>std::stringstream</code> &rarr; <code>memchr</code> + while loops.</strong> Config and keybind parsing now runs on raw <code>char*</code> buffers.</li>
+                    <li><strong><code>&lt;iostream&gt;</code> &rarr; <code>write()</code> syscalls.</strong> No locale init at startup. No static initializers.</li>
+                    <li><strong><code>std::stoi</code> + <code>try</code>/<code>catch</code> &rarr; <code>strtol</code>.</strong> No exception tables needed for parsing integers.</li>
+                    <li><strong>Removed unused config fields:</strong> <code>color_theme</code>, <code>scroll_offset</code>, <code>font_size</code> (stored but never used) eliminated from the Config struct.</li>
+                </ul>
+                <p><strong>Flags used:</strong> <code>-fno-exceptions</code>, <code>-fno-plt</code>, <code>-fno-rtti</code>, <code>-fno-unwind-tables</code>, <code>-fmerge-all-constants</code>, <code>-fno-unroll-loops</code>, <code>--icf=all</code>, <code>--hash-style=sysv</code>, <code>--gc-sections</code>.</p>
+                <p><strong>Sections eviscerated:</strong> <code>.plt</code> (624&rarr;20 bytes), <code>.got.plt</code> (328&rarr;20 bytes), <code>.rela.plt</code> (912&rarr;0 bytes), <code>.gcc_except_table</code> (3.4K&rarr;0 bytes), <code>.eh_frame</code> (5.5K&rarr;48 bytes).</p>
+                <p style="color: #888; font-size: 0.85em;">10 files changed, 422 insertions(+), 356 deletions(-)</p>
+            </div>
+
+            <hr />
+
+            <div style="margin-bottom: 40px;">
                 <h2 style="color: #8a2be2;">v0.5 - Config Mixin, Undo/Redo & Working Settings</h2>
                 <p style="color: #888; font-size: 0.85em;">commit <code>6815087</code></p>
                 <ul>
