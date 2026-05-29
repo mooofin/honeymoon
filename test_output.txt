@@ -1,0 +1,195 @@
+==================== Test output for //tests:undo_test:
+Running main() from gmock_main.cc
+[==========] Running 8 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 8 tests from UndoTest
+[ RUN      ] UndoTest.UndoReturnsPreviousSnapshot
+[       OK ] UndoTest.UndoReturnsPreviousSnapshot (0 ms)
+[ RUN      ] UndoTest.UndoEmptyStackReturnsNullopt
+[       OK ] UndoTest.UndoEmptyStackReturnsNullopt (0 ms)
+[ RUN      ] UndoTest.RedoAfterUndo
+[       OK ] UndoTest.RedoAfterUndo (0 ms)
+[ RUN      ] UndoTest.RedoEmptyStackReturnsNullopt
+[       OK ] UndoTest.RedoEmptyStackReturnsNullopt (0 ms)
+[ RUN      ] UndoTest.TypingGroupPreventsMultipleSnapshots
+[       OK ] UndoTest.TypingGroupPreventsMultipleSnapshots (0 ms)
+[ RUN      ] UndoTest.NewSnapshotClearsRedoStack
+[       OK ] UndoTest.NewSnapshotClearsRedoStack (0 ms)
+[ RUN      ] UndoTest.RespectsMaxUndoLevels
+[       OK ] UndoTest.RespectsMaxUndoLevels (0 ms)
+[ RUN      ] UndoTest.FullUndoRedoCycle
+[       OK ] UndoTest.FullUndoRedoCycle (0 ms)
+[----------] 8 tests from UndoTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 8 tests from 1 test suite ran. (0 ms total)
+[  PASSED  ] 8 tests.
+================================================================================
+==================== Test output for //tests:keybinder_test:
+Running main() from gmock_main.cc
+[==========] Running 11 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 11 tests from KeyBinderTest
+[ RUN      ] KeyBinderTest.MissingFileReturnsEmpty
+[       OK ] KeyBinderTest.MissingFileReturnsEmpty (0 ms)
+[ RUN      ] KeyBinderTest.EmptyFileReturnsEmpty
+[       OK ] KeyBinderTest.EmptyFileReturnsEmpty (0 ms)
+[ RUN      ] KeyBinderTest.SingleKeyBinding
+[       OK ] KeyBinderTest.SingleKeyBinding (0 ms)
+[ RUN      ] KeyBinderTest.MultiKeyBinding
+[       OK ] KeyBinderTest.MultiKeyBinding (0 ms)
+[ RUN      ] KeyBinderTest.MetaPrefixExpandsToEsc
+[       OK ] KeyBinderTest.MetaPrefixExpandsToEsc (0 ms)
+[ RUN      ] KeyBinderTest.NamedKeys
+[       OK ] KeyBinderTest.NamedKeys (0 ms)
+[ RUN      ] KeyBinderTest.EscKey
+[       OK ] KeyBinderTest.EscKey (0 ms)
+[ RUN      ] KeyBinderTest.IgnoresComments
+[       OK ] KeyBinderTest.IgnoresComments (0 ms)
+[ RUN      ] KeyBinderTest.MultipleBindings
+[       OK ] KeyBinderTest.MultipleBindings (0 ms)
+[ RUN      ] KeyBinderTest.SkipsLinesWithOnlyOneToken
+[       OK ] KeyBinderTest.SkipsLinesWithOnlyOneToken (0 ms)
+[ RUN      ] KeyBinderTest.SkipsUnknownKeys
+[       OK ] KeyBinderTest.SkipsUnknownKeys (0 ms)
+[----------] 11 tests from KeyBinderTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 11 tests from 1 test suite ran. (0 ms total)
+[  PASSED  ] 11 tests.
+================================================================================
+==================== Test output for //tests:input_test:
+Running main() from gmock_main.cc
+[==========] Running 13 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 13 tests from InputTest
+[ RUN      ] InputTest.IsPrintableReturnsTrueForPrintable
+[       OK ] InputTest.IsPrintableReturnsTrueForPrintable (0 ms)
+[ RUN      ] InputTest.IsPrintableReturnsFalseForNonPrintable
+[       OK ] InputTest.IsPrintableReturnsFalseForNonPrintable (0 ms)
+[ RUN      ] InputTest.ToStringArrowKeys
+[       OK ] InputTest.ToStringArrowKeys (0 ms)
+[ RUN      ] InputTest.ToStringSpecialKeys
+[       OK ] InputTest.ToStringSpecialKeys (0 ms)
+[ RUN      ] InputTest.ToStringCtrlKeys
+[       OK ] InputTest.ToStringCtrlKeys (0 ms)
+[ RUN      ] InputTest.ToStringPrintable
+[       OK ] InputTest.ToStringPrintable (0 ms)
+[ RUN      ] InputTest.ToStringUnknown
+[       OK ] InputTest.ToStringUnknown (0 ms)
+[ RUN      ] InputTest.KeyFromStringArrowKeys
+[       OK ] InputTest.KeyFromStringArrowKeys (0 ms)
+[ RUN      ] InputTest.KeyFromStringSpecialKeys
+[       OK ] InputTest.KeyFromStringSpecialKeys (0 ms)
+[ RUN      ] InputTest.KeyFromStringCtrlKeys
+[       OK ] InputTest.KeyFromStringCtrlKeys (0 ms)
+[ RUN      ] InputTest.KeyFromStringSingleChar
+[       OK ] InputTest.KeyFromStringSingleChar (0 ms)
+[ RUN      ] InputTest.KeyFromStringReturnsNoneForInvalid
+[       OK ] InputTest.KeyFromStringReturnsNoneForInvalid (0 ms)
+[ RUN      ] InputTest.KeyChordEquality
+[       OK ] InputTest.KeyChordEquality (0 ms)
+[----------] 13 tests from InputTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 13 tests from 1 test suite ran. (0 ms total)
+[  PASSED  ] 13 tests.
+================================================================================
+==================== Test output for //tests:config_test:
+Running main() from gmock_main.cc
+[==========] Running 9 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 9 tests from ConfigTest
+[ RUN      ] ConfigTest.LoadSetsDefaultsForMissingFile
+[       OK ] ConfigTest.LoadSetsDefaultsForMissingFile (0 ms)
+[ RUN      ] ConfigTest.ParseTabWidth
+[       OK ] ConfigTest.ParseTabWidth (0 ms)
+[ RUN      ] ConfigTest.ParseShowLineNumbers
+[       OK ] ConfigTest.ParseShowLineNumbers (0 ms)
+[ RUN      ] ConfigTest.ParseSyntaxHighlighting
+[       OK ] ConfigTest.ParseSyntaxHighlighting (0 ms)
+[ RUN      ] ConfigTest.IgnoresComments
+[       OK ] ConfigTest.IgnoresComments (0 ms)
+[ RUN      ] ConfigTest.IgnoresBlankLines
+[       OK ] ConfigTest.IgnoresBlankLines (0 ms)
+[ RUN      ] ConfigTest.SaveAndReload
+[       OK ] ConfigTest.SaveAndReload (0 ms)
+[ RUN      ] ConfigTest.FileExists
+[       OK ] ConfigTest.FileExists (0 ms)
+[ RUN      ] ConfigTest.FindPathChecksCwdFirst
+[       OK ] ConfigTest.FindPathChecksCwdFirst (0 ms)
+[----------] 9 tests from ConfigTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 9 tests from 1 test suite ran. (0 ms total)
+[  PASSED  ] 9 tests.
+================================================================================
+==================== Test output for //tests:buffer_test:
+Running main() from gmock_main.cc
+[==========] Running 25 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 25 tests from GapBufferTest
+[ RUN      ] GapBufferTest.DefaultConstructedIsEmpty
+[       OK ] GapBufferTest.DefaultConstructedIsEmpty (0 ms)
+[ RUN      ] GapBufferTest.InsertSingleChars
+[       OK ] GapBufferTest.InsertSingleChars (0 ms)
+[ RUN      ] GapBufferTest.InsertString
+[       OK ] GapBufferTest.InsertString (0 ms)
+[ RUN      ] GapBufferTest.InsertStringWithLength
+[       OK ] GapBufferTest.InsertStringWithLength (0 ms)
+[ RUN      ] GapBufferTest.InsertAtCursorPosition
+[       OK ] GapBufferTest.InsertAtCursorPosition (0 ms)
+[ RUN      ] GapBufferTest.DeleteBackward
+[       OK ] GapBufferTest.DeleteBackward (0 ms)
+[ RUN      ] GapBufferTest.DeleteBackwardAtStart
+[       OK ] GapBufferTest.DeleteBackwardAtStart (0 ms)
+[ RUN      ] GapBufferTest.DeleteForward
+[       OK ] GapBufferTest.DeleteForward (0 ms)
+[ RUN      ] GapBufferTest.DeleteForwardAtEnd
+[       OK ] GapBufferTest.DeleteForwardAtEnd (0 ms)
+[ RUN      ] GapBufferTest.DeleteRange
+[       OK ] GapBufferTest.DeleteRange (0 ms)
+[ RUN      ] GapBufferTest.DeleteRangeReversedArgs
+[       OK ] GapBufferTest.DeleteRangeReversedArgs (0 ms)
+[ RUN      ] GapBufferTest.MoveGapToPosition
+[       OK ] GapBufferTest.MoveGapToPosition (0 ms)
+[ RUN      ] GapBufferTest.MoveGapBeyondSize
+[       OK ] GapBufferTest.MoveGapBeyondSize (0 ms)
+[ RUN      ] GapBufferTest.GetCharAt
+[       OK ] GapBufferTest.GetCharAt (0 ms)
+[ RUN      ] GapBufferTest.GetRange
+[       OK ] GapBufferTest.GetRange (0 ms)
+[ RUN      ] GapBufferTest.GetRangeReversed
+[       OK ] GapBufferTest.GetRangeReversed (0 ms)
+[ RUN      ] GapBufferTest.LoadFromFile
+[       OK ] GapBufferTest.LoadFromFile (0 ms)
+[ RUN      ] GapBufferTest.SaveToFile
+[       OK ] GapBufferTest.SaveToFile (0 ms)
+[ RUN      ] GapBufferTest.LoadNonexistentFile
+[       OK ] GapBufferTest.LoadNonexistentFile (0 ms)
+[ RUN      ] GapBufferTest.DirtyAfterInsert
+[       OK ] GapBufferTest.DirtyAfterInsert (0 ms)
+[ RUN      ] GapBufferTest.DirtyAfterDelete
+[       OK ] GapBufferTest.DirtyAfterDelete (0 ms)
+[ RUN      ] GapBufferTest.MoveConstruct
+[       OK ] GapBufferTest.MoveConstruct (0 ms)
+[ RUN      ] GapBufferTest.MoveAssign
+[       OK ] GapBufferTest.MoveAssign (0 ms)
+[ RUN      ] GapBufferTest.GapExpandsWhenFull
+[       OK ] GapBufferTest.GapExpandsWhenFull (0 ms)
+[ RUN      ] GapBufferTest.WideCharBuffer
+[       OK ] GapBufferTest.WideCharBuffer (0 ms)
+[----------] 25 tests from GapBufferTest (0 ms total)
+
+[----------] Global test environment tear-down
+[==========] 25 tests from 1 test suite ran. (0 ms total)
+[  PASSED  ] 25 tests.
+================================================================================
+//tests:buffer_test                                                      PASSED in 0.0s
+//tests:config_test                                                      PASSED in 0.0s
+//tests:input_test                                                       PASSED in 0.0s
+//tests:keybinder_test                                                   PASSED in 0.0s
+//tests:undo_test                                                        PASSED in 0.0s
+
+Executed 5 out of 5 tests: 5 tests pass.
+There were tests whose specified size is too big. Use the --test_verbose_timeout_warnings command line option to see which ones these are.
