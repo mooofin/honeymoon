@@ -77,6 +77,7 @@ namespace honeymoon::mem {
         }
 
         void move_gap(size_type position) {
+            if (position > size()) position = size();
             if (position < gap_start) {
                 size_type move = gap_start - position;
                 std::copy(buffer.begin() + position, buffer.begin() + gap_start, buffer.begin() + gap_end - move);

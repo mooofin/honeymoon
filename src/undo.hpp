@@ -25,6 +25,7 @@ protected:
     undo_stack.push_back({content, cursor});
     if (undo_stack.size() > max_undo_levels)
       undo_stack.erase(undo_stack.begin());
+    redo_stack.clear();
     typing_group_active = true;
   }
 
