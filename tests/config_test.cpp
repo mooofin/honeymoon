@@ -9,111 +9,111 @@
 
 using Config = honeymoon::config::Config;
 
+// Fixture that removes .honeymoonrc after each test even if an assertion fails.
+// Also isolates HOME and XDG_CONFIG_HOME so tests don't accidentally pick up
+// the developer's real config file.
+class ConfigFileTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        const char* h = getenv("HOME");
+        if (h) { old_home_ = h; had_home_ = true; }
+        const char* x = getenv("XDG_CONFIG_HOME");
+        if (x) { old_xdg_ = x; had_xdg_ = true; }
+        // Point HOME somewhere that has no honeymoon config
+        setenv("HOME", "/tmp", 1);
+        unsetenv("XDG_CONFIG_HOME");
+    }
+
+    void TearDown() override {
+        unlink(".honeymoonrc");
+        if (had_home_) setenv("HOME", old_home_.c_str(), 1);
+        else unsetenv("HOME");
+        if (had_xdg_) setenv("XDG_CONFIG_HOME", old_xdg_.c_str(), 1);
+        else unsetenv("XDG_CONFIG_HOME");
+    }
+
+private:
+    std::string old_home_, old_xdg_;
+    bool had_home_ = false, had_xdg_ = false;
+};
+
 // ── Config loading from file ──────────────────────────────────────────────
 
-TEST(ConfigTest, LoadSetsDefaultsForMissingFile) {
+TEST_F(ConfigFileTest, LoadSetsDefaultsForMissingFile) {
     Config cfg;
     bool loaded = cfg.load();
-    // With no config file found, load() should return false
-    // but defaults should remain intact
     EXPECT_FALSE(loaded);
     EXPECT_TRUE(cfg.show_line_numbers);
     EXPECT_TRUE(cfg.syntax_highlighting);
     EXPECT_EQ(cfg.tab_width, 4);
 }
 
-TEST(ConfigTest, ParseTabWidth) {
-    honeymoon::test::TempFile tf("tab_width 2\n");
-    ASSERT_TRUE(tf);
-
-    // Temporarily change cwd so find_path picks up our file
-    // Instead: directly parse by setting up the config path
-    // Actually, Config::load() reads from find_path() which searches XDG paths.
-    // The easiest approach is to create ".honeymoonrc" in cwd.
-
-    // Write a config to ./.honeymoonrc and test
-    {
-        FILE* f = fopen(".honeymoonrc", "w");
-        ASSERT_TRUE(f);
-        fprintf(f, "tab_width 8\n");
-        fclose(f);
-    }
+TEST_F(ConfigFileTest, ParseTabWidth) {
+    FILE* f = fopen(".honeymoonrc", "w");
+    ASSERT_TRUE(f);
+    fprintf(f, "tab_width 8\n");
+    fclose(f);
 
     Config cfg;
-    bool loaded = cfg.load();
-    EXPECT_TRUE(loaded);
+    EXPECT_TRUE(cfg.load());
     EXPECT_EQ(cfg.tab_width, 8);
-
-    // Clean up
-    unlink(".honeymoonrc");
 }
 
-TEST(ConfigTest, ParseShowLineNumbers) {
-    {
-        FILE* f = fopen(".honeymoonrc", "w");
-        ASSERT_TRUE(f);
-        fprintf(f, "show_line_numbers false\n");
-        fclose(f);
-    }
+TEST_F(ConfigFileTest, ParseShowLineNumbers) {
+    FILE* f = fopen(".honeymoonrc", "w");
+    ASSERT_TRUE(f);
+    fprintf(f, "show_line_numbers false\n");
+    fclose(f);
 
     Config cfg;
     cfg.load();
     EXPECT_FALSE(cfg.show_line_numbers);
-
-    unlink(".honeymoonrc");
 }
 
-TEST(ConfigTest, ParseSyntaxHighlighting) {
-    {
-        FILE* f = fopen(".honeymoonrc", "w");
-        ASSERT_TRUE(f);
-        fprintf(f, "syntax_highlighting false\n");
-        fclose(f);
-    }
+TEST_F(ConfigFileTest, ParseSyntaxHighlighting) {
+    FILE* f = fopen(".honeymoonrc", "w");
+    ASSERT_TRUE(f);
+    fprintf(f, "syntax_highlighting false\n");
+    fclose(f);
 
     Config cfg;
     cfg.load();
     EXPECT_FALSE(cfg.syntax_highlighting);
-
-    unlink(".honeymoonrc");
 }
 
-TEST(ConfigTest, IgnoresComments) {
-    {
-        FILE* f = fopen(".honeymoonrc", "w");
-        ASSERT_TRUE(f);
-        fprintf(f, "# this is a comment\ntab_width 2\n");
-        fclose(f);
-    }
+TEST_F(ConfigFileTest, IgnoresComments) {
+    FILE* f = fopen(".honeymoonrc", "w");
+    ASSERT_TRUE(f);
+    fprintf(f, "# this is a comment\ntab_width 2\n");
+    fclose(f);
 
     Config cfg;
     cfg.load();
     EXPECT_EQ(cfg.tab_width, 2);
-
-    unlink(".honeymoonrc");
 }
 
-TEST(ConfigTest, IgnoresBlankLines) {
-    {
-        FILE* f = fopen(".honeymoonrc", "w");
-        ASSERT_TRUE(f);
-        fprintf(f, "\n\n\ntab_width 2\n\n");
-        fclose(f);
-    }
+TEST_F(ConfigFileTest, IgnoresBlankLines) {
+    FILE* f = fopen(".honeymoonrc", "w");
+    ASSERT_TRUE(f);
+    fprintf(f, "\n\n\ntab_width 2\n\n");
+    fclose(f);
 
     Config cfg;
     cfg.load();
     EXPECT_EQ(cfg.tab_width, 2);
+}
 
-    unlink(".honeymoonrc");
+TEST_F(ConfigFileTest, FindPathChecksCwdFirst) {
+    FILE* f = fopen(".honeymoonrc", "w");
+    ASSERT_TRUE(f);
+    fclose(f);
+
+    EXPECT_EQ(Config::find_path(), "./.honeymoonrc");
 }
 
 // ── Config Save ───────────────────────────────────────────────────────────
 
 TEST(ConfigTest, SaveAndReload) {
-    // Create a temp dir with the required subdirectory structure.
-    // save() writes to HOME/.config/honeymoon/config.moon but uses mkdir()
-    // (not mkdir -p), so parents must exist.
     char tmpdir[] = "/tmp/honeymoon_save_XXXXXX";
     ASSERT_NE(mkdtemp(tmpdir), nullptr);
 
@@ -121,34 +121,24 @@ TEST(ConfigTest, SaveAndReload) {
     std::string config_dir = std::string(tmpdir) + "/.config/honeymoon";
     mkdir(config_dir.c_str(), 0755);
 
-    char old_home[4096] = {};
-    char* home_env = getenv("HOME");
-    if (home_env)
-        snprintf(old_home, sizeof(old_home), "%s", home_env);
-    setenv("HOME", tmpdir, 1);
-    unsetenv("XDG_CONFIG_HOME");
+    {
+        honeymoon::test::ScopedEnv home("HOME", tmpdir);
+        honeymoon::test::ScopedEnv xdg("XDG_CONFIG_HOME", nullptr);
 
-    Config cfg;
-    cfg.tab_width = 8;
-    cfg.show_line_numbers = false;
-    cfg.syntax_highlighting = false;
+        Config cfg;
+        cfg.tab_width = 8;
+        cfg.show_line_numbers = false;
+        cfg.syntax_highlighting = false;
 
-    bool saved = cfg.save();
-    EXPECT_TRUE(saved);
+        EXPECT_TRUE(cfg.save());
 
-    // Reload from a fresh config
-    Config reload;
-    bool loaded = reload.load();
-    EXPECT_TRUE(loaded);
-    EXPECT_EQ(reload.tab_width, 8);
-    EXPECT_FALSE(reload.show_line_numbers);
-    EXPECT_FALSE(reload.syntax_highlighting);
+        Config reload;
+        EXPECT_TRUE(reload.load());
+        EXPECT_EQ(reload.tab_width, 8);
+        EXPECT_FALSE(reload.show_line_numbers);
+        EXPECT_FALSE(reload.syntax_highlighting);
+    }
 
-    // Clean up
-    if (!old_home[0])
-        unsetenv("HOME");
-    else
-        setenv("HOME", old_home, 1);
     std::string cfg_file = config_dir + "/config.moon";
     unlink(cfg_file.c_str());
     rmdir(config_dir.c_str());
@@ -164,17 +154,4 @@ TEST(ConfigTest, FileExists) {
 
     EXPECT_TRUE(Config::file_exists(tf.path()));
     EXPECT_FALSE(Config::file_exists("/definitely/not/a/file/12345"));
-}
-
-TEST(ConfigTest, FindPathChecksCwdFirst) {
-    {
-        FILE* f = fopen(".honeymoonrc", "w");
-        ASSERT_TRUE(f);
-        fclose(f);
-    }
-
-    std::string path = Config::find_path();
-    EXPECT_EQ(path, "./.honeymoonrc");
-
-    unlink(".honeymoonrc");
 }

@@ -66,12 +66,10 @@ TEST(KeyBinderTest, NamedKeys) {
     // Note: Key::ArrowRight == -999 == Key::None (pre-existing enum collision),
     // so "Right" cannot be used with the k != Key::None guard.
     // Use other named keys instead.
-    FILE* f = fopen(".test_bindings", "w");
-    ASSERT_TRUE(f);
-    fprintf(f, "PageUp page_up\nPageDown page_down\nHome go_home\n");
-    fclose(f);
+    honeymoon::test::TempFile tf("PageUp page_up\nPageDown page_down\nHome go_home\n");
+    ASSERT_TRUE(tf);
 
-    auto bindings = KeyBinder::load_from_file(".test_bindings");
+    auto bindings = KeyBinder::load_from_file(tf.path());
 
     ASSERT_EQ(bindings.size(), 3);
     EXPECT_EQ(bindings[0].keys[0], Key::PageUp);
@@ -80,8 +78,6 @@ TEST(KeyBinderTest, NamedKeys) {
     EXPECT_EQ(bindings[1].action, "page_down");
     EXPECT_EQ(bindings[2].keys[0], Key::Home);
     EXPECT_EQ(bindings[2].action, "go_home");
-
-    unlink(".test_bindings");
 }
 
 TEST(KeyBinderTest, EscKey) {
