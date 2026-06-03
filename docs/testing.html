@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Honeymoon - Testing</title>
+        <meta property="og:title" content="Honeymoon Editor - Testing" />
+        <meta property="og:description" content="A minimal, Emacs-inspired terminal text editor written in C++23. Fast as fuck." />
+        <meta property="og:image" content="https://mooofin.github.io/honeymoon/images/preview.jpg" />
+        <meta property="og:url" content="https://mooofin.github.io/honeymoon/testing.html" />
+        <meta name="twitter:card" content="summary_large_image" />
+        <link rel="stylesheet" href="style.css" />
+        <link rel="icon" type="image/jpeg" href="images/favicon.jpg" />
+    </head>
+
+    <body>
+        <h1>Testing</h1>
+
+        <div class="nav">
+            <a href="index.html" class="button">Home</a>
+            <a href="tutorial.html" class="button">Guide</a>
+            <a href="internals.html" class="button">Internals</a>
+            <a href="testing.html" class="button">Testing</a>
+            <a href="updates.html" class="button">Updates</a>
+            <a href="https://github.com/mooofin/honeymoon" class="button">Source</a>
+        </div>
+
+        <br />
+
+        <div style="text-align: left; max-width: 800px; margin: 0 auto; background: #fff; border: 1px dotted #ccc; padding: 20px; font-family: 'Times New Roman', serif;">
+
+            <p>
+                <strong>Framework:</strong> GoogleTest (gtest) via Bazel<br />
+                <strong>Suites:</strong> 5 &nbsp;|&nbsp; <strong>Tests:</strong> 50+<br />
+                <strong>Policy:</strong> No mocks. No stubs. Real files, real buffers.
+            </p>
+
+            <hr />
+
+            <h2>Running the Tests</h2>
+
+            <pre><code># Run all suites
+bazel test //tests:all
+
+# Run a specific suite
+bazel test //tests:buffer_test
+bazel test //tests:undo_test
+bazel test //tests:config_test
+bazel test //tests:keybinder_test
+bazel test //tests:input_test
+
+# See full output
+bazel test //tests:all --test_output=all</code></pre>
+
+            <hr />
+
+            <h2>Test Suites</h2>
+
+            <h3>1. GapBuffer &mdash; <code>tests/buffer_test.cpp</code></h3>
+            <p>
+                Tests the core data structure. Covers every public method including
+                construction, single-char and string insertion, backward and forward
+                deletion, range deletion, cursor movement, clamping, content access,
+                file I/O, dirty flag, move semantics, and gap expansion past
+                <code>DEFAULT_GAP_SIZE</code> (1024 bytes).
+            </p>
+            <pre><code class="language-cpp">TEST(GapBufferTest, InsertAtCursorPosition) {
+    GapBuffer buf;
+    buf.insert_string("Helo");
+    buf.move_gap(3);       // cursor after "Hel"
+    buf.insert_char('l');  // → "Hello"
+    EXPECT_EQ(buf.get_content(), "Hello");
+    EXPECT_EQ(buf.get_cursor(), 4);
+}
+
+TEST(GapBufferTest, GapExpandsWhenFull) {
+    GapBuffer buf;
+    std::string big(GapBuffer::DEFAULT_GAP_SIZE + 100, 'x');
+    buf.insert_string(big);
+    EXPECT_EQ(buf.size(), GapBuffer::DEFAULT_GAP_SIZE + 100);
+    EXPECT_EQ(buf.get_content(), big);
+}</code></pre>
+
+            <h3>2. UndoHistory &mdash; <code>tests/undo_test.cpp</code></h3>
+            <p>
+                Tests the snapshot-based undo/redo system. Key design: <code>snapshot_for_undo</code>
+                captures state <em>before</em> an edit. The first snapshot in a typing run sets
+                <code>typing_group_active = true</code>, blocking further snapshots until
+                <code>close_typing_group()</code> is called &mdash; so typing &ldquo;hello&rdquo; is one undo step,
+                not five.
+            </p>
+            <pre><code class="language-cpp">// TestUndo exposes protected members for direct testing
+struct TestUndo : honeymoon::mem::UndoHistory&lt;&gt; {
+    using honeymoon::mem::UndoHistory&lt;&gt;::snapshot_for_undo;
+    using honeymoon::mem::UndoHistory&lt;&gt;::apply_undo;
+    using honeymoon::mem::UndoHistory&lt;&gt;::apply_redo;
+    using honeymoon::mem::UndoHistory&lt;&gt;::close_typing_group;
+};
+
+TEST(UndoTest, FullUndoRedoCycle) {
+    TestUndo undo;
+    // Snapshot before each keystroke, not after
+    undo.close_typing_group(); undo.snapshot_for_undo("",   0);
+    undo.close_typing_group(); undo.snapshot_for_undo("a",  1);
+    undo.close_typing_group(); undo.snapshot_for_undo("ab", 2);
+    // current state is "abc" — passed as cur_content, never snapshotted itself
+
+    auto s1 = undo.apply_undo("abc", 3);
+    EXPECT_EQ(s1->content, "ab");  // returns pre-'c' snapshot
+
+    auto s2 = undo.apply_undo(s1->content, s1->cursor);
+    EXPECT_EQ(s2->content, "a");
+
+    auto r1 = undo.apply_redo(s2->content, s2->cursor);
+    EXPECT_EQ(r1->content, "ab");  // redo restores forward
+}</code></pre>
+
+            <h3>3. Config &mdash; <code>tests/config_test.cpp</code></h3>
+            <p>
+                Tests config parsing, save/reload, and path discovery. All tests that
+                write <code>.honeymoonrc</code> to the current working directory use
+                the <code>ConfigFileTest</code> fixture, which guarantees cleanup in
+                <code>TearDown()</code> even when an assertion fails mid-test.
+                <code>HOME</code> and <code>XDG_CONFIG_HOME</code> are redirected per-test
+                so the developer's real config file doesn't interfere.
+            </p>
+            <pre><code class="language-cpp">class ConfigFileTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        // Save and redirect env so find_path() finds nothing real
+        const char* h = getenv("HOME");
+        if (h) { old_home_ = h; had_home_ = true; }
+        setenv("HOME", "/tmp", 1);
+        unsetenv("XDG_CONFIG_HOME");
+    }
+    void TearDown() override {
+        unlink(".honeymoonrc");  // runs even after ASSERT_ failure
+        if (had_home_) setenv("HOME", old_home_.c_str(), 1);
+        else unsetenv("HOME");
+    }
+    // ...
+};
+
+TEST_F(ConfigFileTest, ParseTabWidth) {
+    FILE* f = fopen(".honeymoonrc", "w");
+    ASSERT_TRUE(f);
+    fprintf(f, "tab_width 8\n");
+    fclose(f);
+
+    Config cfg;
+    EXPECT_TRUE(cfg.load());
+    EXPECT_EQ(cfg.tab_width, 8);
+}</code></pre>
+
+            <h3>4. KeyBinder &mdash; <code>tests/keybinder_test.cpp</code></h3>
+            <p>
+                Tests the <code>keybinds.moon</code> parser. Covers empty files, single keys,
+                multi-key chords, <code>M-</code> prefix expansion to <code>[Esc, key]</code>,
+                named keys (<code>PageUp</code>, <code>Home</code>, etc.), comment stripping,
+                and unknown key rejection.
+            </p>
+            <pre><code class="language-cpp">TEST(KeyBinderTest, MetaPrefixExpandsToEsc) {
+    honeymoon::test::TempFile tf("M-x eval-expression\n");
+    ASSERT_TRUE(tf);
+
+    auto bindings = KeyBinder::load_from_file(tf.path());
+    ASSERT_EQ(bindings.size(), 1);
+    ASSERT_EQ(bindings[0].keys.size(), 2);
+    EXPECT_EQ(bindings[0].keys[0], Key::Esc);          // M- → Esc prefix
+    EXPECT_EQ(bindings[0].keys[1], Key('x'));
+    EXPECT_EQ(bindings[0].action, "eval-expression");
+}
+
+TEST(KeyBinderTest, MultiKeyBinding) {
+    honeymoon::test::TempFile tf("C-x C-c quit\n");
+    ASSERT_TRUE(tf);
+
+    auto bindings = KeyBinder::load_from_file(tf.path());
+    EXPECT_EQ(bindings[0].keys[0], Key::Ctrl_X);
+    EXPECT_EQ(bindings[0].keys[1], Key::Ctrl_C);
+    EXPECT_EQ(bindings[0].action, "quit");
+}</code></pre>
+
+            <h3>5. Input &mdash; <code>tests/input_test.cpp</code></h3>
+            <p>
+                Tests the <code>Key</code> enum utilities: <code>is_printable</code>,
+                <code>to_string</code> for all named keys and printable chars, and
+                <code>key_from_string</code> round-trips. Also covers <code>KeyChord</code>
+                equality.
+            </p>
+            <pre><code class="language-cpp">TEST(InputTest, ToStringPrintable) {
+    EXPECT_EQ(to_string(static_cast&lt;Key&gt;('A')), "A");
+    EXPECT_EQ(to_string(static_cast&lt;Key&gt;('z')), "z");
+}
+
+TEST(InputTest, KeyFromStringReturnsNoneForInvalid) {
+    EXPECT_EQ(key_from_string("NotAKey"), Key::None);
+    EXPECT_EQ(key_from_string(""),        Key::None);
+}</code></pre>
+
+            <hr />
+
+            <h2>Test Infrastructure &mdash; <code>tests/test_utils.hpp</code></h2>
+
+            <h3>TempFile</h3>
+            <p>
+                RAII wrapper that creates a <code>mkstemp</code> temp file with given content and
+                deletes it on destruction. Validates that <code>write()</code> succeeds fully &mdash;
+                if the write is short or fails, the object invalidates itself
+                (<code>operator bool</code> returns false). This prevents tests from passing
+                against a silently corrupted file.
+            </p>
+            <pre><code class="language-cpp">// Usage: just construct it, check operator bool, and use path()
+honeymoon::test::TempFile tf("tab_width 8\n");
+ASSERT_TRUE(tf);
+cfg.load_from_file(tf.path());
+// tf auto-deleted when it goes out of scope</code></pre>
+
+            <h3>ScopedEnv</h3>
+            <p>
+                RAII wrapper that saves an environment variable, sets it to a new value,
+                and restores the original on destruction. Prevents env mutation from
+                leaking between tests even when assertions fire early.
+            </p>
+            <pre><code class="language-cpp">// Redirect HOME for the duration of the block
+honeymoon::test::ScopedEnv home("HOME", tmpdir);
+honeymoon::test::ScopedEnv xdg("XDG_CONFIG_HOME", nullptr); // unsets it
+
+cfg.save();    // writes to tmpdir/.config/honeymoon/config.moon
+reload.load(); // reads it back
+
+// HOME and XDG_CONFIG_HOME restored automatically here</code></pre>
+
+            <hr />
+
+            <h2>Known Gotchas</h2>
+
+            <p>
+                <strong><code>Key::ArrowRight</code> used to equal <code>Key::None</code>.</strong>
+                Both were <code>-999</code>. The enum now uses <code>None = -9999</code> so all
+                arrow keys have distinct values. The old collision caused <code>Right</code> arrow
+                bindings to be silently dropped by the keybinder's <code>k != Key::None</code> guard.
+            </p>
+
+            <p>
+                <strong>Undo snapshots store pre-edit state.</strong> <code>snapshot_for_undo("ab", 2)</code>
+                is called <em>before</em> typing 'c', not after. Tests that got this backwards
+                would assert the wrong values on undo.
+            </p>
+
+            <div class="warning" style="font-size: 12px; padding: 5px;">
+                Tests run in an isolated Bazel sandbox. They do not depend on the developer's
+                <code>HOME</code>, <code>keybinds.moon</code>, or any config files.
+            </div>
+
+        </div>
+
+        <div class="footer">
+            <a href="https://github.com/mooofin">Contact the Author (mooofin)</a>
+            <p>Out-sing, out-edit, out-slay.</p>
+        </div>
+    </body>
+</html>

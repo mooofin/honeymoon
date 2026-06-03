@@ -27,12 +27,11 @@
 
         <div class="nav">
             <a href="index.html" class="button">Home</a>
-            <a href="tutorial.html" class="button">Tutorial</a>
+            <a href="tutorial.html" class="button">Guide</a>
             <a href="internals.html" class="button">Internals</a>
+            <a href="testing.html" class="button">Testing</a>
             <a href="updates.html" class="button">Updates</a>
-            <a href="https://github.com/mooofin/honeymoon" class="button"
-                >Source</a
-            >
+            <a href="https://github.com/mooofin/honeymoon" class="button">Source</a>
         </div>
 
         <br />
@@ -192,19 +191,21 @@ void save_to_file(const std::string&amp; filename) {
 
             <hr />
 
-            <h2>4. Stack-Buffered Rendering</h2>
+            <h2>4. Render Buffer</h2>
             <p>
-                The entire frame is built on the stack in a fixed
-                <code>char[4096]</code> buffer, then flushed in a single
-                <code>write()</code> syscall. Zero heap allocations per frame.
+                The entire frame is assembled into a <code>RenderBuf</code> and flushed
+                in a single <code>write()</code> syscall. The buffer uses <code>std::string</code>
+                internally so it grows to fit any terminal size without truncation.
             </p>
             <pre><code class="language-cpp">// src/editor.hpp
 struct RenderBuf {
-    char data[4096];
-    size_t len = 0;
-    void clear() { len = 0; }
-    RenderBuf&amp; append(const char* s) { /* memcpy into data */ return *this; }
-    RenderBuf&amp; append(char c) { /* single byte */ return *this; }
+    std::string buf;
+    void clear() { buf.clear(); }
+    RenderBuf&amp; append(const char* s)           { buf += s;            return *this; }
+    RenderBuf&amp; append(char c)                  { buf += c;            return *this; }
+    RenderBuf&amp; append(int n, char c)           { buf.append(n, c);    return *this; }
+    RenderBuf&amp; append(const char* s, size_t n) { buf.append(s, n);    return *this; }
+    RenderBuf&amp; append(const std::string&amp; s)    { buf += s;            return *this; }
 };
 
 void refresh_screen() {
@@ -216,8 +217,13 @@ void refresh_screen() {
     place_cursor();    // Move real terminal cursor
 
     output_buffer.append("\x1b[?25h"); // Show cursor
-    terminal.write_raw(output_buffer.data, output_buffer.len); // Atomic flush
+    terminal.write_raw(output_buffer.buf.data(), output_buffer.buf.size()); // Atomic flush
 }</code></pre>
+            <div class="warning" style="font-size: 12px; padding: 5px">
+                The original v0.6 buffer was <code>char[4096]</code> with silent truncation.
+                A 200-col &times; 50-row terminal with ANSI codes can easily exceed that.
+                Fixed in v0.7.
+            </div>
 
             <hr />
 
