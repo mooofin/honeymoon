@@ -102,14 +102,13 @@ private:
   std::string status_message =
       "Honeymoon | C-x C-c: Quit | C-x C-s: Save | C-SP: Mark";
   struct RenderBuf {
-    char data[4096];
-    size_t len = 0;
-    void clear() { len = 0; }
-    RenderBuf& append(const char* s) { while (*s && len < sizeof(data)) data[len++] = *s++; return *this; }
-    RenderBuf& append(char c) { if (len < sizeof(data)) data[len++] = c; return *this; }
-    RenderBuf& append(int n, char c) { if (n <= 0) return *this; size_t avail = sizeof(data) - len; size_t m = (size_t)n < avail ? (size_t)n : avail; for (size_t i = 0; i < m; i++) data[len++] = c; return *this; }
-    RenderBuf& append(const char* s, size_t n) { size_t m = n < sizeof(data) - len ? n : sizeof(data) - len; memcpy(data + len, s, m); len += m; return *this; }
-    RenderBuf& append(const std::string& s) { append(s.data(), s.size()); return *this; }
+    std::string buf;
+    void clear() { buf.clear(); }
+    RenderBuf& append(const char* s) { buf += s; return *this; }
+    RenderBuf& append(char c) { buf += c; return *this; }
+    RenderBuf& append(int n, char c) { if (n > 0) buf.append(n, c); return *this; }
+    RenderBuf& append(const char* s, size_t n) { buf.append(s, n); return *this; }
+    RenderBuf& append(const std::string& s) { buf += s; return *this; }
   } output_buffer;
   char* clipboard = nullptr;
   size_t clipboard_len = 0;
@@ -292,7 +291,67 @@ private:
   void bind_default_keys() {
     root_node = new KeyNode;
     current_node = root_node;
-    load_custom_binds();
+    add_default_bindings();
+    load_custom_binds();  // custom file overrides defaults
+  }
+
+  void add_default_bindings() {
+    using K = Key;
+    struct Def { std::vector<Key> keys; const char* action; };
+    std::initializer_list<Def> defs = {
+      // File
+      {{K::Ctrl_X, K::Ctrl_S}, "save_file"},
+      {{K::Ctrl_X, K::Ctrl_F}, "find_file"},
+      {{K::Ctrl_X, K::Ctrl_C}, "quit"},
+      // Buffer
+      {{K::Ctrl_X, K::Ctrl_B}, "list_buffers"},
+      {{K::Ctrl_X, static_cast<K>('b')}, "list_buffers"},
+      {{K::Ctrl_X, static_cast<K>('k')}, "kill_buffer"},
+      {{K::Ctrl_X, static_cast<K>('h')}, "select_all"},
+      // Edit
+      {{K::Ctrl_Space}, "mark_set"},
+      {{K::Ctrl_G},     "cancel"},
+      {{K::Ctrl_W},     "cut"},
+      {{K::Esc, static_cast<K>('w')}, "copy"},
+      {{K::Ctrl_Y},     "yank"},
+      {{K::Enter},      "newline"},
+      {{K::Ctrl_J},     "newline"},
+      {{K::Backspace},  "delete_backward"},
+      {{K::Del},        "delete_forward"},
+      {{K::Ctrl_K},     "kill_line"},
+      {{K::Esc, static_cast<K>('d')}, "kill_word"},
+      {{K::Ctrl_T},     "transpose_chars"},
+      {{K::Esc, static_cast<K>('t')}, "transpose_words"},
+      {{K::Tab},        "indent"},
+      {{K::ShiftTab},   "dedent"},
+      // Movement
+      {{K::Ctrl_F},     "move_right"},
+      {{K::Ctrl_B},     "move_left"},
+      {{K::Ctrl_N},     "move_down"},
+      {{K::Ctrl_P},     "move_up"},
+      {{K::ArrowRight}, "move_right"},
+      {{K::ArrowLeft},  "move_left"},
+      {{K::ArrowDown},  "move_down"},
+      {{K::ArrowUp},    "move_up"},
+      {{K::Ctrl_A},     "move_line_start"},
+      {{K::Ctrl_E},     "move_line_end"},
+      {{K::Esc, static_cast<K>('f')}, "move_word_forward"},
+      {{K::Esc, static_cast<K>('b')}, "move_word_backward"},
+      // Search
+      {{K::Ctrl_S},     "search_forward"},
+      {{K::Ctrl_R},     "search_backward"},
+      // Nav
+      {{K::Ctrl_L},     "recenter"},
+      {{K::Esc, static_cast<K>('g')}, "goto_line"},
+      // Undo/redo
+      {{K::Ctrl_Slash}, "undo"},
+      {{K::Esc, K::Ctrl_Slash}, "redo"},
+      // Help
+      {{K::Ctrl_H, static_cast<K>('k')}, "help_key"},
+      {{K::Ctrl_H, static_cast<K>('f')}, "help_func"},
+    };
+    for (auto& d : defs)
+      add_binding(d.keys, d.action);
   }
 
   void add_binding(const std::vector<Key> &keys, const std::string &action) {
@@ -351,7 +410,7 @@ private:
 
     std::visit(render_visitor, mode);
     output_buffer.append("\x1b[?25h");
-    terminal.write_raw(output_buffer.data, output_buffer.len);
+    terminal.write_raw(output_buffer.buf.data(), output_buffer.buf.size());
   }
 
   int get_display_width(const std::string &s) {
@@ -697,6 +756,7 @@ private:
 
       if (!current_node->action.empty() && !current_node->first_child) {
         ActionId aid = lookup_action(current_node->action);
+        std::string action_name = current_node->action;
         current_node = root_node;
         pending_key_count = 0;
         status_message = "";
@@ -704,7 +764,7 @@ private:
         if (aid != ACT_NONE)
           execute_action(aid);
         else
-          status_message = std::string("Action not found: ") + current_node->action;
+          status_message = "Action not found: " + action_name;
       } else {
         std::string msg;
         for (int i = 0; i < pending_key_count; ++i) {
@@ -1096,13 +1156,53 @@ private:
   void perform_indent(bool forward) {
     snapshot_for_undo(buffer.get_content(), buffer.get_cursor());
     if (selection_anchor != std::string::npos) {
-      status_message = "Block indent todo";
+      std::string c = buffer.get_content();
+      size_t sel_lo = std::min(selection_anchor, buffer.get_cursor());
+      size_t sel_hi = std::max(selection_anchor, buffer.get_cursor());
+
+      // Expand to full line boundaries
+      size_t block_start = sel_lo;
+      while (block_start > 0 && c[block_start - 1] != '\n') block_start--;
+
+      // If sel_hi lands exactly at a line start, exclude that empty leading line
+      size_t block_end = sel_hi;
+      if (block_end > 0 && block_end <= c.size() && c[block_end - 1] == '\n') block_end--;
+      while (block_end < c.size() && c[block_end] != '\n') block_end++;
+
+      std::string result;
+      result.reserve(block_end - block_start + 64);
+      size_t pos = block_start;
+      while (pos <= block_end) {
+        size_t nl = c.find('\n', pos);
+        size_t line_end = (nl == std::string::npos || nl > block_end) ? block_end : nl;
+        size_t line_len = line_end - pos;
+        if (forward) {
+          result.append(tab_width, ' ');
+          result.append(c, pos, line_len);
+        } else {
+          size_t skip = 0;
+          while (skip < (size_t)tab_width && pos + skip < c.size() && c[pos + skip] == ' ')
+            skip++;
+          result.append(c, pos + skip, line_len > skip ? line_len - skip : 0);
+        }
+        if (nl != std::string::npos && nl <= block_end) {
+          result += '\n';
+          pos = nl + 1;
+        } else {
+          break;
+        }
+      }
+
+      buffer.delete_range(block_start, block_end);
+      buffer.move_gap(block_start);
+      buffer.insert_string(result);
+      selection_anchor = std::string::npos;
+      status_message = forward ? "Indented block" : "Dedented block";
     } else {
       if (forward) {
         for (int i = 0; i < tab_width; ++i)
           buffer.insert_char(' ');
       } else {
-
         std::string c = buffer.get_content();
         size_t cur = buffer.get_cursor();
         size_t line_start = cur;

@@ -9,7 +9,7 @@
 #include <string_view>
 
 enum class Key : int {
-  None = -999,
+  None = -9999,
   Null = 0,
   Ctrl_Space = 0,
   Ctrl_2 = 0,
