@@ -1,45 +1,53 @@
 <!doctype html>
 <html lang="en">
-    <head>
-        <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>Honeymoon - Testing</title>
-        <meta property="og:title" content="Honeymoon Editor - Testing" />
-        <meta property="og:description" content="A minimal, Emacs-inspired terminal text editor written in C++23. Fast as fuck." />
-        <meta property="og:image" content="https://mooofin.github.io/honeymoon/images/preview.jpg" />
-        <meta property="og:url" content="https://mooofin.github.io/honeymoon/testing.html" />
-        <meta name="twitter:card" content="summary_large_image" />
-        <link rel="stylesheet" href="style.css" />
-        <link rel="icon" type="image/jpeg" href="images/favicon.jpg" />
-    </head>
 
-    <body>
-        <h1>Testing</h1>
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Honeymoon - Testing</title>
+    <meta property="og:title" content="Honeymoon Editor - Testing" />
+    <meta property="og:description"
+        content="A minimal, Emacs-inspired terminal text editor written in C++23. Fast as fuck." />
+    <meta property="og:image" content="https://mooofin.github.io/honeymoon/images/preview.jpg" />
+    <meta property="og:url" content="https://mooofin.github.io/honeymoon/testing.html" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="stylesheet" href="style.css" />
+    <link rel="icon" type="image/jpeg" href="images/favicon.jpg" />
+</head>
 
-        <div class="nav">
-            <a href="index.html" class="button">Home</a>
-            <a href="tutorial.html" class="button">Guide</a>
-            <a href="internals.html" class="button">Internals</a>
-            <a href="testing.html" class="button">Testing</a>
-            <a href="updates.html" class="button">Updates</a>
-            <a href="https://github.com/mooofin/honeymoon" class="button">Source</a>
-        </div>
+<body>
+    <h1>Testing</h1>
 
-        <br />
+    <div class="nav">
+        <a href="index.html" class="button">Home</a>
+        <a href="tutorial.html" class="button">Guide</a>
+        <a href="internals.html" class="button">Internals</a>
+        <a href="testing.html" class="button">Testing</a>
+        <a href="updates.html" class="button">Updates</a>
+        <a href="https://github.com/mooofin/honeymoon" class="button">Source</a>
+    </div>
 
-        <div style="text-align: left; max-width: 800px; margin: 0 auto; background: #fff; border: 1px dotted #ccc; padding: 20px; font-family: 'Times New Roman', serif;">
+    <br />
 
-            <p>
-                <strong>Framework:</strong> GoogleTest (gtest) via Bazel<br />
-                <strong>Suites:</strong> 5 &nbsp;|&nbsp; <strong>Tests:</strong> 50+<br />
-                <strong>Policy:</strong> No mocks. No stubs. Real files, real buffers.
-            </p>
+    <div
+        style="text-align: left; max-width: 800px; margin: 0 auto; background: #fff; border: 1px dotted #ccc; padding: 20px; font-family: 'Times New Roman', serif;">
 
-            <hr />
+        <p>
+            <strong>Framework:</strong> GoogleTest (gtest) via Bazel<br />
+            <strong>Suites:</strong> 5 &nbsp;|&nbsp; <strong>Tests:</strong> 50+<br />
+            <strong>Policy:</strong> No mocks. No stubs. Real files, real buffers ehe.
+        </p>
 
-            <h2>Running the Tests</h2>
+        <p>
+            If it doesn't test against real state, it's a suggestion.
+            Every suite here hits actual memory, actual disk, actual env. No fakes.
+        </p>
 
-            <pre><code># Run all suites
+        <hr />
+
+        <h2>Running the Tests</h2>
+
+        <pre><code># Run all suites
 bazel test //tests:all
 
 # Run a specific suite
@@ -52,19 +60,19 @@ bazel test //tests:input_test
 # See full output
 bazel test //tests:all --test_output=all</code></pre>
 
-            <hr />
+        <hr />
 
-            <h2>Test Suites</h2>
+        <h2>Test Suites</h2>
 
-            <h3>1. GapBuffer &mdash; <code>tests/buffer_test.cpp</code></h3>
-            <p>
-                Tests the core data structure. Covers every public method including
-                construction, single-char and string insertion, backward and forward
-                deletion, range deletion, cursor movement, clamping, content access,
-                file I/O, dirty flag, move semantics, and gap expansion past
-                <code>DEFAULT_GAP_SIZE</code> (1024 bytes).
-            </p>
-            <pre><code class="language-cpp">TEST(GapBufferTest, InsertAtCursorPosition) {
+        <h3>1. GapBuffer: <code>tests/buffer_test.cpp</code></h3>
+        <p>
+            The gap buffer is the whole editor's spine. If this breaks, everything breaks.
+            Every public method gets tested: construction, single-char and string insertion,
+            backward and forward deletion, range deletion, cursor movement, clamping,
+            content access, file I/O, dirty flag, move semantics, and gap expansion past
+            <code>DEFAULT_GAP_SIZE</code> (1024 bytes).
+        </p>
+        <pre><code class="language-cpp">TEST(GapBufferTest, InsertAtCursorPosition) {
     GapBuffer buf;
     buf.insert_string("Helo");
     buf.move_gap(3);       // cursor after "Hel"
@@ -81,15 +89,15 @@ TEST(GapBufferTest, GapExpandsWhenFull) {
     EXPECT_EQ(buf.get_content(), big);
 }</code></pre>
 
-            <h3>2. UndoHistory &mdash; <code>tests/undo_test.cpp</code></h3>
-            <p>
-                Tests the snapshot-based undo/redo system. Key design: <code>snapshot_for_undo</code>
-                captures state <em>before</em> an edit. The first snapshot in a typing run sets
-                <code>typing_group_active = true</code>, blocking further snapshots until
-                <code>close_typing_group()</code> is called &mdash; so typing &ldquo;hello&rdquo; is one undo step,
-                not five.
-            </p>
-            <pre><code class="language-cpp">// TestUndo exposes protected members for direct testing
+        <h3>2. UndoHistory: <code>tests/undo_test.cpp</code></h3>
+        <p>
+            Snapshot-based undo/redo. The key design: <code>snapshot_for_undo</code>
+            captures state <em>before</em> an edit, not after. The first snapshot in a
+            typing run sets <code>typing_group_active = true</code>, which blocks further
+            snapshots until <code>close_typing_group()</code> is called. Typing "hello" is
+            one undo step, not five. (I mean its not really a group but ykwhatevs)
+        </p>
+        <pre><code class="language-cpp">// TestUndo exposes protected members for direct testing
 struct TestUndo : honeymoon::mem::UndoHistory&lt;&gt; {
     using honeymoon::mem::UndoHistory&lt;&gt;::snapshot_for_undo;
     using honeymoon::mem::UndoHistory&lt;&gt;::apply_undo;
@@ -103,7 +111,7 @@ TEST(UndoTest, FullUndoRedoCycle) {
     undo.close_typing_group(); undo.snapshot_for_undo("",   0);
     undo.close_typing_group(); undo.snapshot_for_undo("a",  1);
     undo.close_typing_group(); undo.snapshot_for_undo("ab", 2);
-    // current state is "abc" — passed as cur_content, never snapshotted itself
+    // current state is "abc" - passed as cur_content, never snapshotted itself
 
     auto s1 = undo.apply_undo("abc", 3);
     EXPECT_EQ(s1->content, "ab");  // returns pre-'c' snapshot
@@ -115,16 +123,16 @@ TEST(UndoTest, FullUndoRedoCycle) {
     EXPECT_EQ(r1->content, "ab");  // redo restores forward
 }</code></pre>
 
-            <h3>3. Config &mdash; <code>tests/config_test.cpp</code></h3>
-            <p>
-                Tests config parsing, save/reload, and path discovery. All tests that
-                write <code>.honeymoonrc</code> to the current working directory use
-                the <code>ConfigFileTest</code> fixture, which guarantees cleanup in
-                <code>TearDown()</code> even when an assertion fails mid-test.
-                <code>HOME</code> and <code>XDG_CONFIG_HOME</code> are redirected per-test
-                so the developer's real config file doesn't interfere.
-            </p>
-            <pre><code class="language-cpp">class ConfigFileTest : public ::testing::Test {
+        <h3>3. Config: <code>tests/config_test.cpp</code></h3>
+        <p>
+            Config parsing, save/reload, and path discovery. Every test that writes
+            <code>.honeymoonrc</code> uses the <code>ConfigFileTest</code> fixture,
+            which runs <code>TearDown()</code> even when an assertion fails halfway through.
+            No leftover files, no test pollution. <code>HOME</code> and
+            <code>XDG_CONFIG_HOME</code> are redirected per-test so your real config never
+            touches the suite. Bazel's sandbox enforces this anyway.
+        </p>
+        <pre><code class="language-cpp">class ConfigFileTest : public ::testing::Test {
 protected:
     void SetUp() override {
         // Save and redirect env so find_path() finds nothing real
@@ -152,14 +160,15 @@ TEST_F(ConfigFileTest, ParseTabWidth) {
     EXPECT_EQ(cfg.tab_width, 8);
 }</code></pre>
 
-            <h3>4. KeyBinder &mdash; <code>tests/keybinder_test.cpp</code></h3>
-            <p>
-                Tests the <code>keybinds.moon</code> parser. Covers empty files, single keys,
-                multi-key chords, <code>M-</code> prefix expansion to <code>[Esc, key]</code>,
-                named keys (<code>PageUp</code>, <code>Home</code>, etc.), comment stripping,
-                and unknown key rejection.
-            </p>
-            <pre><code class="language-cpp">TEST(KeyBinderTest, MetaPrefixExpandsToEsc) {
+        <h3>4. KeyBinder: <code>tests/keybinder_test.cpp</code></h3>
+        <p>
+            The <code>keybinds.moon</code> parser. Empty files, single keys, multi-key
+            chords, <code>M-</code> prefix expansion to <code>[Esc, key]</code>, named
+            keys (<code>PageUp</code>, <code>Home</code>, etc.), comment stripping, and
+            unknown key rejection. If the parser silently swallows a bad binding
+            users will think their keyboard is broken.
+        </p>
+        <pre><code class="language-cpp">TEST(KeyBinderTest, MetaPrefixExpandsToEsc) {
     honeymoon::test::TempFile tf("M-x eval-expression\n");
     ASSERT_TRUE(tf);
 
@@ -181,14 +190,15 @@ TEST(KeyBinderTest, MultiKeyBinding) {
     EXPECT_EQ(bindings[0].action, "quit");
 }</code></pre>
 
-            <h3>5. Input &mdash; <code>tests/input_test.cpp</code></h3>
-            <p>
-                Tests the <code>Key</code> enum utilities: <code>is_printable</code>,
-                <code>to_string</code> for all named keys and printable chars, and
-                <code>key_from_string</code> round-trips. Also covers <code>KeyChord</code>
-                equality.
-            </p>
-            <pre><code class="language-cpp">TEST(InputTest, ToStringPrintable) {
+        <h3>5. Input: <code>tests/input_test.cpp</code></h3>
+        <p>
+            The <code>Key</code> enum utilities. <code>is_printable</code>,
+            <code>to_string</code> for all named keys and printable chars,
+            and <code>key_from_string</code> round-trips. Also covers
+            <code>KeyChord</code> equality. Small surface,but a bug here would be hard to figure our ig
+
+        </p>
+        <pre><code class="language-cpp">TEST(InputTest, ToStringPrintable) {
     EXPECT_EQ(to_string(static_cast&lt;Key&gt;('A')), "A");
     EXPECT_EQ(to_string(static_cast&lt;Key&gt;('z')), "z");
 }
@@ -198,31 +208,30 @@ TEST(InputTest, KeyFromStringReturnsNoneForInvalid) {
     EXPECT_EQ(key_from_string(""),        Key::None);
 }</code></pre>
 
-            <hr />
+        <hr />
 
-            <h2>Test Infrastructure &mdash; <code>tests/test_utils.hpp</code></h2>
+        <h2>Test Infrastructure: <code>tests/test_utils.hpp</code></h2>
 
-            <h3>TempFile</h3>
-            <p>
-                RAII wrapper that creates a <code>mkstemp</code> temp file with given content and
-                deletes it on destruction. Validates that <code>write()</code> succeeds fully &mdash;
-                if the write is short or fails, the object invalidates itself
-                (<code>operator bool</code> returns false). This prevents tests from passing
-                against a silently corrupted file.
-            </p>
-            <pre><code class="language-cpp">// Usage: just construct it, check operator bool, and use path()
+        <h3>TempFile</h3>
+        <p>
+            RAII wrapper. Creates a <code>mkstemp</code> temp file with given content,
+            deletes it on destruction. If the write is short or fails, the object
+            invalidates itself (<code>operator bool</code> returns false) so tests
+            don't silently pass against a corrupted file.
+        </p>
+        <pre><code class="language-cpp">// Usage: just construct it, check operator bool, and use path()
 honeymoon::test::TempFile tf("tab_width 8\n");
 ASSERT_TRUE(tf);
 cfg.load_from_file(tf.path());
 // tf auto-deleted when it goes out of scope</code></pre>
 
-            <h3>ScopedEnv</h3>
-            <p>
-                RAII wrapper that saves an environment variable, sets it to a new value,
-                and restores the original on destruction. Prevents env mutation from
-                leaking between tests even when assertions fire early.
-            </p>
-            <pre><code class="language-cpp">// Redirect HOME for the duration of the block
+        <h3>ScopedEnv</h3>
+        <p>
+            RAII wrapper for environment variables. Saves the current value, sets
+            a new one, restores on destruction. Env mutation does not leak between
+            tests even when assertions fire early. Pass <code>nullptr</code> to unset.
+        </p>
+        <pre><code class="language-cpp">// Redirect HOME for the duration of the block
 honeymoon::test::ScopedEnv home("HOME", tmpdir);
 honeymoon::test::ScopedEnv xdg("XDG_CONFIG_HOME", nullptr); // unsets it
 
@@ -231,33 +240,166 @@ reload.load(); // reads it back
 
 // HOME and XDG_CONFIG_HOME restored automatically here</code></pre>
 
-            <hr />
+        <hr />
 
-            <h2>Known Gotchas</h2>
+        <h2>Dependency Graph</h2>
 
-            <p>
-                <strong><code>Key::ArrowRight</code> used to equal <code>Key::None</code>.</strong>
-                Both were <code>-999</code>. The enum now uses <code>None = -9999</code> so all
-                arrow keys have distinct values. The old collision caused <code>Right</code> arrow
-                bindings to be silently dropped by the keybinder's <code>k != Key::None</code> guard.
-            </p>
+        <p>
+            Every test suite depends on <code>honeymoon_lib</code>. Touch the lib,
+            all five suites rebuild.(TODO add a image here for DAG maybe?)
+        </p>
 
-            <p>
-                <strong>Undo snapshots store pre-edit state.</strong> <code>snapshot_for_undo("ab", 2)</code>
-                is called <em>before</em> typing 'c', not after. Tests that got this backwards
-                would assert the wrong values on undo.
-            </p>
-
-            <div class="warning" style="font-size: 12px; padding: 5px;">
-                Tests run in an isolated Bazel sandbox. They do not depend on the developer's
-                <code>HOME</code>, <code>keybinds.moon</code>, or any config files.
-            </div>
-
+        <div style="text-align: center; margin: 16px 0;">
+            <img src="images/bazel_dag.png" alt="Bazel dependency graph"
+                style="max-width: 100%; border: 1px dotted #ccc;" />
         </div>
 
-        <div class="footer">
-            <a href="https://github.com/mooofin">Contact the Author (mooofin)</a>
-            <p>Out-sing, out-edit, out-slay.</p>
+        <p style="font-size: 12px; color: #666;">
+            Generated with:
+            <code>bazel query 'deps(//:honeymoon)' --output graph | dot -Tpng &gt; graph.png</code>
+        </p>
+
+        <hr />
+
+        <h2>Benchmarking</h2>
+
+        <p>
+            If you can't measure it you can't fix it. my guide to how to actually
+            find out where the time goes.
+        </p>
+
+        <h3>Cold build</h3>
+        <pre><code>bazel clean && time bazel build //:honeymoon</code></pre>
+        <p>
+            Wipes the output tree first. This is worst-case compile cost. Run it
+            once after a big refactor to see if you've made things worse.
+        </p>
+
+        <h3>Warm build</h3>
+        <pre><code>time bazel build //:honeymoon</code></pre>
+        <p>
+            Nothing changed means under a second. This is what your
+            edit-compile loop actually feels like day to day.
+        </p>
+
+        <h3>Build profile</h3>
+        <pre><code>bazel build //:honeymoon --profile=profile.gz
+bazel analyze-profile profile.gz</code></pre>
+        <p>
+            Slowest actions, critical path, parallelism efficiency, cache hit rate.
+            The critical path is what matters: it's the longest sequential chain
+            and it sets the floor. No amount of extra cores fixes a long critical path.
+        </p>
+
+        <h3>Editor startup time</h3>
+        <pre><code># One shot
+time ./bazel-bin/honeymoon large_file.txt
+
+# Statistics (install hyperfine first)
+hyperfine --warmup 3 './bazel-bin/honeymoon large_file.txt'</code></pre>
+        <p>
+            <code>hyperfine</code> runs the command multiple times and gives you mean,
+            standard deviation, min, max. The <code>--warmup</code> runs let the OS
+            page cache settle before measuring. Without warmup you're benchmarking
+            your disk.
+        </p>
+
+        <h3>CPU hotspots</h3>
+        <pre><code>bazel build //:honeymoon --compilation_mode=dbg
+perf record -g ./bazel-bin/honeymoon large_file.txt
+perf report</code></pre>
+        <p>
+            <code>dbg</code> disables optimization and keeps symbols so stack traces
+            are readable. For real performance numbers use <code>opt</code> (the default).
+        </p>
+
+        <h3>Allocation cost</h3>
+        <pre><code>bazel build //:honeymoon --compilation_mode=dbg
+valgrind --tool=callgrind ./bazel-bin/honeymoon test.txt
+kcachegrind callgrind.out.*</code></pre>
+        <p>
+            Callgrind counts instructions per function. Good for finding which
+            buffer operations are eating the most. <code>kcachegrind</code> turns
+            that data into a visual call graph so you don't have to squint at numbers.
+        </p>
+
+        <hr />
+
+        <h2>Known Gotchas</h2>
+
+        <p>
+            <strong><code>Key::ArrowRight</code> used to equal <code>Key::None</code>.</strong>
+            Both were <code>-999</code>. The fix was obvious in retrospect: <code>None = -9999</code>.
+            The old collision caused every Right arrow binding to be silently dropped
+            by the keybinder's <code>k != Key::None</code> guard. nobody :( noticed until
+            the tests were written. sob sob
+        </p>
+
+        <p>
+            <strong>Undo snapshots store pre-edit state.</strong> <code>snapshot_for_undo("ab", 2)</code>
+            is called <em>before</em> typing 'c', not after. Tests that got this backwards
+            would assert the wrong values on undo and pass for the wrong reason.
+        </p>
+
+        <div class="warning" style="font-size: 12px; padding: 5px;">
+            Tests run in an isolated Bazel sandbox. They do not depend on your
+            <code>HOME</code>, your <code>keybinds.moon</code>, or any config files on your machine.
+            If a test fails on your box but passes in CI, check your environment maybe
         </div>
-    </body>
+
+        <hr />
+
+        <h2>The Bazel 9 / GoogleTest Mismatch</h2>
+
+        <p>
+            If someone on an older machine tells you the build is broken and gtest won't
+            compile, this is probably why. Bazel 9 removed auto-loading of
+            <code>cc_library</code> and <code>cc_test</code> as native rules. You now
+            have to explicitly declare where they come from:
+        </p>
+
+        <pre><code>load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")</code></pre>
+
+        <p>
+            GoogleTest 1.17.0's own <code>BUILD.bazel</code> didn't have this. It was
+            written assuming the old Bazel behavior where these rules were just
+            available everywhere. Bazel 7 and 8: fine. Bazel 9: instant build failure,
+            cryptic error about <code>cc_library</code> not being defined.
+        </p>
+
+        <p>
+            The fix is in <code>third_party/googletest_bazel9.patch</code>. It patches
+            gtest's <code>BUILD.bazel</code> at fetch time to add the missing
+            <code>load()</code>, and is applied automatically via
+            <code>single_version_override</code> in <code>MODULE.bazel</code>:
+        </p>
+
+        <pre><code>single_version_override(
+    module_name = "googletest",
+    version = "1.17.0",
+    patches = ["//third_party:googletest_bazel9.patch"],
+    patch_strip = 1,
+)</code></pre>
+
+        <p>
+            You never have to think about it. But if you're cloning this repo and
+            something explodes with a message about <code>re2</code> or
+            <code>cc_library not declared</code>, check your Bazel version first:
+        </p>
+
+        <pre><code>bazel version</code></pre>
+
+        <p>
+            Anything below 9 and the patch is unnecessary but harmless.
+
+        </p>
+
+    </div>
+
+    <div class="footer">
+        <a href="https://github.com/mooofin">Contact the Author (mooofin)</a>
+        <p>Out-sing, out-edit, out-slay.</p>
+    </div>
+</body>
+
 </html>
