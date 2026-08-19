@@ -30,13 +30,13 @@
 
             <div style="margin-bottom: 40px;">
                 <h2 style="color: #8a2be2;">v0.7 - Bug Fixes &amp; Test Infrastructure</h2>
-                <p style="color: #888; font-size: 0.85em;">commits <code>76aaa44</code> &mdash; <code>c8d8dab</code></p>
+                <p style="color: #888; font-size: 0.85em;">commits <code>76aaa44</code> - <code>c8d8dab</code></p>
                 <ul>
-                    <li><strong><code>Key::ArrowRight == Key::None</code> &mdash; fixed.</strong> Both were <code>-999</code>. <code>None</code> moved to <code>-9999</code>. Right arrow now works in keybindings.</li>
-                    <li><strong>RenderBuf overflow &mdash; fixed.</strong> The <code>char[4096]</code> render buffer silently truncated on large terminals. Replaced with <code>std::string</code> that grows as needed.</li>
-                    <li><strong>Action-not-found message &mdash; fixed.</strong> The error message was reading <code>current_node->action</code> <em>after</em> <code>current_node</code> was reset to <code>root_node</code>. Always printed nothing. Fixed by capturing the name first.</li>
+                    <li><strong><code>Key::ArrowRight == Key::None</code> - fixed.</strong> Both were <code>-999</code>. <code>None</code> moved to <code>-9999</code>. Right arrow now works in keybindings.</li>
+                    <li><strong>RenderBuf overflow - fixed.</strong> The <code>char[4096]</code> render buffer silently truncated on large terminals. Replaced with <code>std::string</code> that grows as needed.</li>
+                    <li><strong>Action-not-found message - fixed.</strong> The error message was reading <code>current_node->action</code> <em>after</em> <code>current_node</code> was reset to <code>root_node</code>. Always printed nothing. Fixed by capturing the name first.</li>
                     <li><strong>Hardcoded default keybindings.</strong> The editor was a brick if <code>keybinds.moon</code> was missing. All standard Emacs bindings are now embedded in the binary. The file still overrides defaults on load.</li>
-                    <li><strong>Block indent &mdash; implemented.</strong> Selecting lines and pressing <code>Tab</code>/<code>ShiftTab</code> now indents or dedents the whole block. Was a <code>TODO</code> before.</li>
+                    <li><strong>Block indent - implemented.</strong> Selecting lines and pressing <code>Tab</code>/<code>ShiftTab</code> now indents or dedents the whole block. Was a <code>TODO</code> before.</li>
                     <li><strong>gtest suites added</strong> covering GapBuffer (20 tests), UndoHistory (6), Config (8), KeyBinder (9), Input (7). See the <a href="testing.html">Testing page</a> for full docs.</li>
                     <li><strong>Test isolation fixed.</strong> Config tests now use a <code>ConfigFileTest</code> fixture with <code>SetUp</code>/<code>TearDown</code>. <code>ScopedEnv</code> RAII prevents env mutation from leaking between tests. <code>TempFile</code> validates writes.</li>
                     <li><strong>Added <code>.clang-format</code></strong> (LLVM base, 4-space indent, 100 col).</li>
